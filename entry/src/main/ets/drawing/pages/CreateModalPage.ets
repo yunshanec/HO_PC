@@ -175,10 +175,10 @@ export struct CreateModalPage {
           .borderRadius(12)
           .margin({ top: 20, left: 20, right: 20 })
 
-          // 选择纸张形状
+          // 圆形团花（固定，无需选择）
           Column() {
             Row() {
-              Text('选择纸张形状')
+              Text('圆形团花')
                 .fontSize(14)
                 .fontWeight(FontWeight.Bold)
                 .fontColor('#333333')
@@ -187,7 +187,6 @@ export struct CreateModalPage {
             .margin({ bottom: 12 })
 
             Row() {
-              // 圆形
               Column() {
                 Column()
                   .width(48)
@@ -206,49 +205,14 @@ export struct CreateModalPage {
                   .fontSize(12)
                   .fontColor('#999999')
               }
-              .layoutWeight(1)
+              .width('100%')
               .padding(20)
               .borderRadius(12)
               .border({
-                width: this.selectedPaper === 'CIRCLE' ? 2 : 1,
-                color: this.selectedPaper === 'CIRCLE' ? '#E60012' : '#E0E0E0'
+                width: 2,
+                color: '#E60012'
               })
-              .backgroundColor(this.selectedPaper === 'CIRCLE' ? '#FFE0E0' : Color.White)
-              .onClick(() => {
-                this.selectedPaper = 'CIRCLE';
-              })
-              .margin({ right: 12 })
-
-              // 方形
-              Column() {
-                Column()
-                  .width(48)
-                  .height(48)
-                  .borderRadius(8)
-                  .backgroundColor(this.selectedColor)
-                  .margin({ bottom: 8 })
-
-                Text('方形团花')
-                  .fontSize(14)
-                  .fontWeight(FontWeight.Medium)
-                  .fontColor('#333333')
-                  .margin({ bottom: 4 })
-
-                Text('零-八角团花')
-                  .fontSize(12)
-                  .fontColor('#999999')
-              }
-              .layoutWeight(1)
-              .padding(20)
-              .borderRadius(12)
-              .border({
-                width: this.selectedPaper === 'SQUARE' ? 2 : 1,
-                color: this.selectedPaper === 'SQUARE' ? '#E60012' : '#E0E0E0'
-              })
-              .backgroundColor(this.selectedPaper === 'SQUARE' ? '#FFE0E0' : Color.White)
-              .onClick(() => {
-                this.selectedPaper = 'SQUARE';
-              })
+              .backgroundColor('#FFE0E0')
             }
             .width('100%')
           }

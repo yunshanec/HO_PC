@@ -13,6 +13,7 @@
  * limitations under the License.
  */
 import { image } from '@kit.ImageKit';
+import { Action } from '../common/types';
 
 export default interface XComponentContext {
   draw(canvasType:string, shapeType: string):void;
@@ -30,4 +31,7 @@ export default interface XComponentContext {
   undo(): void;
   redo(): void;
   clear(): void;
+  getActions(): Action[];
+  setZoom(zoom: number): void;
+  setPan(x: number, y: number): void;
 };

@@ -237,12 +237,13 @@ void PaperCutEngine::RenderInputCanvas(OH_Drawing_Canvas* canvas)
     int width = OH_Drawing_CanvasGetWidth(canvas);
     int height = OH_Drawing_CanvasGetHeight(canvas);
     float centerX = width * 0.5f;
-    float centerY = height * 0.5f;
     float paperRadius = std::min(width, height) * PAPER_RADIUS_RATIO;
     float clipRadius = std::min(width, height) * CLIP_RADIUS_RATIO;
     
     bool isFullPaper = (foldMode_ == FoldMode::ZERO);
-    float sectorAngle = isFullPaper ? (2.0f * M_PI) : ((2.0f * M_PI) / (static_cast<int>(foldMode_) * 2));
+    // 0折：圆心在画布中心；其他折：圆心在x轴居中，y轴在底部（圆心y = height - radius）
+    float centerY = isFullPaper ? (height * 0.5f) : (height - paperRadius);
+    float sectorAngle = isFullPaper ? (2.0f * M_PI) : ((2.0f * M_PI) / (static_cast<int>(foldMode_) + 1));
     float baseRotation = isFullPaper ? 0 : -sectorAngle / 2.0f;
     
     // 保存状态
@@ -259,20 +260,17 @@ void PaperCutEngine::RenderInputCanvas(OH_Drawing_Canvas* canvas)
     OH_Drawing_CanvasRotate(canvas, (baseRotation + drawState_.rotation) * 180.0f / M_PI, 0, 0);
     OH_Drawing_CanvasTranslate(canvas, -centerX, -centerY);
     
-    // 设置裁剪区域 - 纸张逻辑层（在变换后的坐标系统中，中心是(0,0)）
-    // 注意：在变换后的坐标系统中，需要使用屏幕坐标除以缩放比例
-    float modelPaperRadius = paperRadius / (VIEW_SCALE * drawState_.zoom);
-    float modelClipRadius = clipRadius / (VIEW_SCALE * drawState_.zoom);
-    
+    // 设置裁剪区域 - 纸张逻辑层
     OH_Drawing_CanvasSave(canvas);
     OH_Drawing_Path* clipPath = OH_Drawing_PathCreate();
     
+    // 在变换后的坐标系统中，中心是(0,0)
     if (isFullPaper) {
         if (paperType_ == PaperType::CIRCLE) {
-            OH_Drawing_PathAddCircle(clipPath, 0, 0, modelPaperRadius, PATH_DIRECTION_CCW);
+            OH_Drawing_PathAddCircle(clipPath, 0, 0, paperRadius, PATH_DIRECTION_CCW);
         } else {
-            OH_Drawing_PathAddRect(clipPath, -modelPaperRadius, -modelPaperRadius,
-                                  modelPaperRadius, modelPaperRadius, PATH_DIRECTION_CCW);
+            OH_Drawing_PathAddRect(clipPath, -paperRadius, -paperRadius,
+                                  paperRadius, paperRadius, PATH_DIRECTION_CCW);
         }
     } else {
         float startAngle = -M_PI / 2.0f;
@@ -280,8 +278,8 @@ void PaperCutEngine::RenderInputCanvas(OH_Drawing_Canvas* canvas)
         OH_Drawing_PathMoveTo(clipPath, 0, 0);
         // 使用圆弧绘制扇形
         for (float angle = startAngle; angle <= endAngle; angle += 0.1f) {
-            float x = cos(angle) * modelClipRadius;
-            float y = sin(angle) * modelClipRadius;
+            float x = cos(angle) * clipRadius;
+            float y = sin(angle) * clipRadius;
             OH_Drawing_PathLineTo(clipPath, x, y);
         }
         OH_Drawing_PathLineTo(clipPath, 0, 0);
@@ -291,17 +289,19 @@ void PaperCutEngine::RenderInputCanvas(OH_Drawing_Canvas* canvas)
     OH_Drawing_CanvasClipPath(canvas, clipPath, OH_Drawing_CanvasClipOp::INTERSECT, true);
     OH_Drawing_PathDestroy(clipPath);
     
-    // 绘制纸张底色（在裁剪区域内，在变换后的坐标系统中，中心是(0,0)）
+    // 绘制纸张底色（在变换后的坐标系统中，中心是(0,0)）
+    // 使用已定义的paperRadius变量
+    
     OH_Drawing_Brush* brush = OH_Drawing_BrushCreate();
     OH_Drawing_BrushSetColor(brush, paperColor_);
     
     OH_Drawing_Path* paperPath = OH_Drawing_PathCreate();
     
     if (paperType_ == PaperType::CIRCLE) {
-        OH_Drawing_PathAddCircle(paperPath, 0, 0, modelPaperRadius, PATH_DIRECTION_CCW);
+        OH_Drawing_PathAddCircle(paperPath, 0, 0, paperRadius, PATH_DIRECTION_CCW);
     } else {
-        OH_Drawing_PathAddRect(paperPath, -modelPaperRadius, -modelPaperRadius,
-                               modelPaperRadius, modelPaperRadius, PATH_DIRECTION_CCW);
+        OH_Drawing_PathAddRect(paperPath, -paperRadius, -paperRadius,
+                               paperRadius, paperRadius, PATH_DIRECTION_CCW);
     }
     
     OH_Drawing_CanvasAttachBrush(canvas, brush);
@@ -350,8 +350,11 @@ void PaperCutEngine::RenderOutputCanvas(OH_Drawing_Canvas* canvas)
     int width = OH_Drawing_CanvasGetWidth(canvas);
     int height = OH_Drawing_CanvasGetHeight(canvas);
     float centerX = width * 0.5f;
-    float centerY = height * 0.5f;
     float paperRadius = std::min(width, height) * PAPER_RADIUS_RATIO;
+    
+    bool isFullPaper = (foldMode_ == FoldMode::ZERO);
+    // 0折：圆心在画布中心；其他折：圆心在x轴居中，y轴在底部（圆心y = height - radius）
+    float centerY = isFullPaper ? (height * 0.5f) : (height - paperRadius);
     
     // 保存状态
     OH_Drawing_CanvasSave(canvas);
@@ -362,12 +365,11 @@ void PaperCutEngine::RenderOutputCanvas(OH_Drawing_Canvas* canvas)
     DrawPaperBase(canvas);
     
     // 应用对称变换绘制裁剪
-    bool isFullPaper = (foldMode_ == FoldMode::ZERO);
     if (isFullPaper) {
         DrawActions(canvas);
     } else {
-        float sectorAngle = (2.0f * M_PI) / (static_cast<int>(foldMode_) * 2);
-        int totalSegments = static_cast<int>(foldMode_) * 2;
+        float sectorAngle = (2.0f * M_PI) / (static_cast<int>(foldMode_) + 1);
+        int totalSegments = static_cast<int>(foldMode_) + 1;
         
         for (int i = 0; i < totalSegments; i++) {
             OH_Drawing_CanvasSave(canvas);
@@ -432,17 +434,14 @@ void PaperCutEngine::DrawFoldLines(OH_Drawing_Canvas* canvas)
     if (!canvas) return;
     
     // 注意：这个函数在RenderInputCanvas中被调用，此时坐标系统已经变换
-    // 中心点已经移动到(0,0)，所以使用相对坐标（模型坐标）
+    // 中心点已经移动到(0,0)，所以使用相对坐标
     int width = OH_Drawing_CanvasGetWidth(canvas);
     int height = OH_Drawing_CanvasGetHeight(canvas);
-    // 计算模型坐标的半径（在变换后的坐标系统中）
-    float screenPaperRadius = std::min(width, height) * PAPER_RADIUS_RATIO;
-    float modelPaperRadius = screenPaperRadius / (VIEW_SCALE * drawState_.zoom);
-    float screenClipRadius = std::min(width, height) * CLIP_RADIUS_RATIO;
-    float modelClipRadius = screenClipRadius / (VIEW_SCALE * drawState_.zoom);
+    float paperRadius = std::min(width, height) * PAPER_RADIUS_RATIO;
+    float clipRadius = std::min(width, height) * CLIP_RADIUS_RATIO;
     
     bool isFullPaper = (foldMode_ == FoldMode::ZERO);
-    float sectorAngle = isFullPaper ? (2.0f * M_PI) : ((2.0f * M_PI) / (static_cast<int>(foldMode_) * 2));
+    float sectorAngle = isFullPaper ? (2.0f * M_PI) : ((2.0f * M_PI) / (static_cast<int>(foldMode_) + 1));
     
     OH_Drawing_Pen* pen = OH_Drawing_PenCreate();
     OH_Drawing_PenSetColor(pen, 0x80000000);  // 半透明黑色
@@ -452,10 +451,10 @@ void PaperCutEngine::DrawFoldLines(OH_Drawing_Canvas* canvas)
     
     if (isFullPaper) {
         if (paperType_ == PaperType::CIRCLE) {
-            OH_Drawing_PathAddCircle(path, 0, 0, modelPaperRadius, PATH_DIRECTION_CCW);
+            OH_Drawing_PathAddCircle(path, 0, 0, paperRadius, PATH_DIRECTION_CCW);
         } else {
-            OH_Drawing_PathAddRect(path, -modelPaperRadius, -modelPaperRadius,
-                                  modelPaperRadius, modelPaperRadius, PATH_DIRECTION_CCW);
+            OH_Drawing_PathAddRect(path, -paperRadius, -paperRadius,
+                                  paperRadius, paperRadius, PATH_DIRECTION_CCW);
         }
     } else {
         float startAngle = -M_PI / 2.0f;
@@ -463,8 +462,8 @@ void PaperCutEngine::DrawFoldLines(OH_Drawing_Canvas* canvas)
         OH_Drawing_PathMoveTo(path, 0, 0);
         // 使用圆弧绘制扇形
         for (float angle = startAngle; angle <= endAngle; angle += 0.1f) {
-            float x = cos(angle) * modelClipRadius;
-            float y = sin(angle) * modelClipRadius;
+            float x = cos(angle) * clipRadius;
+            float y = sin(angle) * clipRadius;
             OH_Drawing_PathLineTo(path, x, y);
         }
         OH_Drawing_PathLineTo(path, 0, 0);
@@ -483,19 +482,17 @@ void PaperCutEngine::DrawActions(OH_Drawing_Canvas* canvas)
 {
     if (!canvas) return;
     
-    // 计算模型坐标的纸张半径（在变换后的坐标系统中）
-    float screenPaperRadius = std::min(canvasWidth_, canvasHeight_) * PAPER_RADIUS_RATIO;
-    float modelPaperRadius = screenPaperRadius / (VIEW_SCALE * drawState_.zoom);
+    float paperRadius = std::min(canvasWidth_, canvasHeight_) * PAPER_RADIUS_RATIO;
     
     // 设置裁剪区域
     OH_Drawing_CanvasSave(canvas);
     OH_Drawing_Path* clipPath = OH_Drawing_PathCreate();
     
     if (paperType_ == PaperType::CIRCLE) {
-        OH_Drawing_PathAddCircle(clipPath, 0, 0, modelPaperRadius, PATH_DIRECTION_CCW);
+        OH_Drawing_PathAddCircle(clipPath, 0, 0, paperRadius, PATH_DIRECTION_CCW);
     } else {
-        OH_Drawing_PathAddRect(clipPath, -modelPaperRadius, -modelPaperRadius,
-                              modelPaperRadius, modelPaperRadius, PATH_DIRECTION_CCW);
+        OH_Drawing_PathAddRect(clipPath, -paperRadius, -paperRadius,
+                              paperRadius, paperRadius, PATH_DIRECTION_CCW);
     }
     
     OH_Drawing_CanvasClipPath(canvas, clipPath, OH_Drawing_CanvasClipOp::INTERSECT, true);
@@ -532,7 +529,7 @@ void PaperCutEngine::DrawActions(OH_Drawing_Canvas* canvas)
             if (action.tool == ToolMode::DRAFT_PEN) {
                 DrawPencilStroke(canvas, action.points);
             } else if (action.tool == ToolMode::DRAFT_ERASER) {
-                ErasePencilStroke(canvas, action.points);
+                ErasePencilStroke(canvas, action.points, 0xFFFDF6E3);  // 使用米色背景擦除
             }
         }
     }
@@ -561,7 +558,7 @@ void PaperCutEngine::DrawActions(OH_Drawing_Canvas* canvas)
         } else if (currentToolMode_ == ToolMode::DRAFT_PEN) {
             DrawPencilStroke(canvas, currentPoints_);
         } else if (currentToolMode_ == ToolMode::DRAFT_ERASER) {
-            ErasePencilStroke(canvas, currentPoints_);
+            ErasePencilStroke(canvas, currentPoints_, 0xFFFDF6E3);  // 使用米色背景擦除
         }
     }
     
@@ -635,7 +632,7 @@ void PaperCutEngine::DrawPencilStroke(OH_Drawing_Canvas* canvas, const std::vect
     OH_Drawing_PathDestroy(path);
 }
 
-void PaperCutEngine::ErasePencilStroke(OH_Drawing_Canvas* canvas, const std::vector<Point>& points)
+void PaperCutEngine::ErasePencilStroke(OH_Drawing_Canvas* canvas, const std::vector<Point>& points, uint32_t backgroundColor)
 {
     if (!canvas || points.size() < 2) return;
     
@@ -653,7 +650,7 @@ void PaperCutEngine::ErasePencilStroke(OH_Drawing_Canvas* canvas, const std::vec
     }
     
     OH_Drawing_Pen* pen = OH_Drawing_PenCreate();
-    OH_Drawing_PenSetColor(pen, 0x00000000);  // 透明
+    OH_Drawing_PenSetColor(pen, backgroundColor);  // 使用背景色擦除
     OH_Drawing_PenSetWidth(pen, 8.0f);
     // 注意：ROUND和DST_OUT可能不存在，移除这些设置
     // OH_Drawing_PenSetCap(pen, OH_Drawing_PenLineCapStyle::BUTT);
@@ -735,6 +732,7 @@ void PaperCutEngine::FinishDrawing()
         std::chrono::system_clock::now().time_since_epoch()).count();
     
     actions_.push_back(action);
+    actionRedoStack_.clear();
     redoStack_.clear();
     
     isDrawing_ = false;
@@ -782,6 +780,7 @@ void PaperCutEngine::CloseBezier()
         std::chrono::system_clock::now().time_since_epoch()).count();
     
     actions_.push_back(action);
+    actionRedoStack_.clear();
     redoStack_.clear();
     
     CancelBezier();
@@ -799,21 +798,22 @@ void PaperCutEngine::Undo()
     
     Action last = actions_.back();
     actions_.pop_back();
-    redoStack_.insert(redoStack_.begin(), last);
+    actionRedoStack_.insert(actionRedoStack_.begin(), last);
 }
 
 void PaperCutEngine::Redo()
 {
-    if (redoStack_.empty()) return;
+    if (actionRedoStack_.empty()) return;
     
-    Action next = redoStack_[0];
-    redoStack_.erase(redoStack_.begin());
+    Action next = actionRedoStack_[0];
+    actionRedoStack_.erase(actionRedoStack_.begin());
     actions_.push_back(next);
 }
 
 void PaperCutEngine::Clear()
 {
     actions_.clear();
+    actionRedoStack_.clear();
     redoStack_.clear();
     CancelDrawing();
     CancelBezier();
@@ -844,9 +844,15 @@ void PaperCutEngine::AddAction(const Action& action)
     actions_.push_back(action);
 }
 
+std::vector<Action> PaperCutEngine::GetActions() const
+{
+    return actions_;
+}
+
 void PaperCutEngine::SetActions(const std::vector<Action>& actions)
 {
     actions_ = actions;
+    actionRedoStack_.clear();
     redoStack_.clear();
 }
 
@@ -854,7 +860,10 @@ Point PaperCutEngine::ScreenToModel(float x, float y) const
 {
     // 坐标转换逻辑
     float centerX = canvasWidth_ * 0.5f;
-    float centerY = canvasHeight_ * 0.5f;
+    float paperRadius = std::min(canvasWidth_, canvasHeight_) * PAPER_RADIUS_RATIO;
+    bool isFullPaper = (foldMode_ == FoldMode::ZERO);
+    // 0折：圆心在画布中心；其他折：圆心在x轴居中，y轴在底部
+    float centerY = isFullPaper ? (canvasHeight_ * 0.5f) : (canvasHeight_ - paperRadius);
     
     float modelX = (x - centerX) / (VIEW_SCALE * drawState_.zoom) - drawState_.pan.x;
     float modelY = (y - centerY) / (VIEW_SCALE * drawState_.zoom) - drawState_.pan.y;
@@ -865,7 +874,10 @@ Point PaperCutEngine::ScreenToModel(float x, float y) const
 Point PaperCutEngine::ModelToScreen(float x, float y) const
 {
     float centerX = canvasWidth_ * 0.5f;
-    float centerY = canvasHeight_ * 0.5f;
+    float paperRadius = std::min(canvasWidth_, canvasHeight_) * PAPER_RADIUS_RATIO;
+    bool isFullPaper = (foldMode_ == FoldMode::ZERO);
+    // 0折：圆心在画布中心；其他折：圆心在x轴居中，y轴在底部
+    float centerY = isFullPaper ? (canvasHeight_ * 0.5f) : (canvasHeight_ - paperRadius);
     
     float screenX = (x + drawState_.pan.x) * (VIEW_SCALE * drawState_.zoom) + centerX;
     float screenY = (y + drawState_.pan.y) * (VIEW_SCALE * drawState_.zoom) + centerY;

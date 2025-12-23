@@ -44,6 +44,9 @@ export interface NativeModule {
   undo: () => void;
   redo: () => void;
   clear: () => void;
+  getActions: () => Action[];
+  setZoom: (zoom: number) => void;
+  setPan: (x: number, y: number) => void;
 }
 
 export interface GlobalObject {

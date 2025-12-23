@@ -162,7 +162,10 @@ void PaperCutRender::Export(napi_env env, napi_value exports)
         {"setPaperColor", nullptr, SetPaperColor, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"undo", nullptr, Undo, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"redo", nullptr, Redo, nullptr, nullptr, nullptr, napi_default, nullptr},
-        {"clear", nullptr, Clear, nullptr, nullptr, nullptr, napi_default, nullptr}
+        {"clear", nullptr, Clear, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"getActions", nullptr, GetActions, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"setZoom", nullptr, SetZoom, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"setPan", nullptr, SetPan, nullptr, nullptr, nullptr, napi_default, nullptr}
     };
     
     if (napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc) != napi_ok) {
@@ -394,6 +397,117 @@ napi_value PaperCutRender::Clear(napi_env env, napi_callback_info info)
     if (render && render->engine_) {
         render->engine_->Clear();
     }
+    return nullptr;
+}
+
+napi_value PaperCutRender::GetActions(napi_env env, napi_callback_info info)
+{
+    PaperCutRender *render = GetRenderFromArgs(env, info);
+    if (!render || !render->engine_) {
+        napi_value emptyArray;
+        napi_create_array(env, &emptyArray);
+        return emptyArray;
+    }
+    
+    std::vector<Action> actions = render->engine_->GetActions();
+    napi_value result;
+    napi_create_array(env, &result);
+    
+    for (size_t i = 0; i < actions.size(); i++) {
+        const Action& action = actions[i];
+        
+        napi_value actionObj;
+        napi_create_object(env, &actionObj);
+        
+        // id
+        napi_value idValue;
+        napi_create_string_utf8(env, action.id.c_str(), NAPI_AUTO_LENGTH, &idValue);
+        napi_set_named_property(env, actionObj, "id", idValue);
+        
+        // type
+        napi_value typeValue;
+        napi_create_int32(env, static_cast<int32_t>(action.type), &typeValue);
+        napi_set_named_property(env, actionObj, "type", typeValue);
+        
+        // tool
+        napi_value toolValue;
+        napi_create_int32(env, static_cast<int32_t>(action.tool), &toolValue);
+        napi_set_named_property(env, actionObj, "tool", toolValue);
+        
+        // timestamp
+        napi_value timestampValue;
+        napi_create_int64(env, action.timestamp, &timestampValue);
+        napi_set_named_property(env, actionObj, "timestamp", timestampValue);
+        
+        // points
+        napi_value pointsArray;
+        napi_create_array(env, &pointsArray);
+        for (size_t j = 0; j < action.points.size(); j++) {
+            napi_value pointObj;
+            napi_create_object(env, &pointObj);
+            
+            napi_value xValue;
+            napi_create_double(env, action.points[j].x, &xValue);
+            napi_set_named_property(env, pointObj, "x", xValue);
+            
+            napi_value yValue;
+            napi_create_double(env, action.points[j].y, &yValue);
+            napi_set_named_property(env, pointObj, "y", yValue);
+            
+            napi_set_element(env, pointsArray, j, pointObj);
+        }
+        napi_set_named_property(env, actionObj, "points", pointsArray);
+        
+        napi_set_element(env, result, i, actionObj);
+    }
+    
+    return result;
+}
+
+napi_value PaperCutRender::SetZoom(napi_env env, napi_callback_info info)
+{
+    size_t argc = 1;
+    napi_value args[1];
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    
+    if (argc < 1) {
+        LOGE("SetZoom: insufficient arguments");
+        return nullptr;
+    }
+    
+    PaperCutRender *render = GetRenderFromArgs(env, info);
+    if (!render || !render->engine_) {
+        return nullptr;
+    }
+    
+    double zoom;
+    napi_get_value_double(env, args[0], &zoom);
+    
+    render->engine_->SetZoom(static_cast<float>(zoom));
+    return nullptr;
+}
+
+napi_value PaperCutRender::SetPan(napi_env env, napi_callback_info info)
+{
+    size_t argc = 2;
+    napi_value args[2];
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    
+    if (argc < 2) {
+        LOGE("SetPan: insufficient arguments");
+        return nullptr;
+    }
+    
+    PaperCutRender *render = GetRenderFromArgs(env, info);
+    if (!render || !render->engine_) {
+        return nullptr;
+    }
+    
+    double x, y;
+    napi_get_value_double(env, args[0], &x);
+    napi_get_value_double(env, args[1], &y);
+    
+    render->engine_->SetPan(static_cast<float>(x), static_cast<float>(y));
     return nullptr;
 }
 

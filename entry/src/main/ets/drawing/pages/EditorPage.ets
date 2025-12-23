@@ -1,7 +1,15 @@
 // 编辑器页面
-import { router } from '@kit.ArkUI';
+import { router, window } from '@kit.ArkUI';
+import { preferences } from '@kit.ArkData';
 import XComponentContext from '../../interface/XComponentContext';
-import { SavedWork, RouterParams, NativeModule, GlobalObject, TouchPoint } from '../../common/types';
+import { SavedWork, RouterParams, NativeModule, GlobalObject, TouchPoint, Action } from '../../common/types';
+
+// 鼠标事件常量（HarmonyOS API）
+const MOUSE_BUTTON_LEFT = 0;
+const MOUSE_BUTTON_RIGHT = 2;
+const MOUSE_ACTION_PRESS = 0;
+const MOUSE_ACTION_MOVE = 1;
+const MOUSE_ACTION_RELEASE = 2;
 
 @Entry
 @Component
@@ -16,6 +24,15 @@ export struct EditorPage {
   @State showScissorMenu: boolean = false;
   @State showPreview: boolean = false;
   @State isSplitMode: boolean = false;
+  @State scaleValue: number = 1.0;  // 缩放值
+  @State pinchValue: number = 1.0;  // 捏合手势的缩放值
+  @State panX: number = 0;  // 平移X
+  @State panY: number = 0;  // 平移Y
+  @State isPinching: boolean = false;  // 是否正在捏合
+  @State isPanning: boolean = false;  // 是否正在平移
+  @State isRightMouseDown: boolean = false;  // 是否按下鼠标右键
+  @State lastMouseX: number = 0;  // 上次鼠标X位置
+  @State lastMouseY: number = 0;  // 上次鼠标Y位置
 
   private xComponentController: XComponentController = new XComponentController();
   private previewXComponentController: XComponentController = new XComponentController();
@@ -24,6 +41,8 @@ export struct EditorPage {
   private previewNativeWindow: string | number | null = null;
   private work: SavedWork | null = null;
   private viewMode: boolean = false;
+  private lastPanX: number = 0;
+  private lastPanY: number = 0;
 
   aboutToAppear() {
     // 获取传递的参数
@@ -68,15 +87,33 @@ export struct EditorPage {
       if (nativeWindow) {
         this.nativeWindow = nativeWindow;
 
-        // 初始化引擎
-        const width = 2048;
-        const height = 2048;
+        // 获取屏幕尺寸（异步获取，先使用默认值）
+        // Native层会根据实际的NativeWindow buffer尺寸进行适配
+        let width: number = 2048;
+        let height: number = 2048;
+        
+        // 尝试异步获取窗口尺寸（不影响初始化流程）
+        window.getLastWindow(getContext(this)).then((windowClass: window.Window) => {
+          return windowClass.getWindowProperties();
+        }).then((windowProperties: window.WindowProperties) => {
+          const newWidth: number = windowProperties.windowRect.width > 0 ? windowProperties.windowRect.width : 2048;
+          const newHeight: number = windowProperties.windowRect.height > 0 ? windowProperties.windowRect.height : 2048;
+          if (newWidth !== width || newHeight !== height) {
+            console.info('EditorPage: Window size updated to:', newWidth, 'x', newHeight);
+            // 如果需要，可以重新初始化引擎（但通常Native层会自动适配）
+          }
+        }).catch((error: Error) => {
+          console.warn('EditorPage: Failed to get window size, using default:', error.message);
+        });
+        
+        // 使用默认值初始化引擎（Native层会根据实际buffer尺寸适配）
         console.info('EditorPage: Initializing engine with size:', width, 'x', height);
         this.papercutModule.initializeEngine(nativeWindow, width, height);
 
         // 设置纸张类型和颜色（必须在初始化引擎之后）
-        const paperTypeValue = this.paperType === 'CIRCLE' ? 0 : 1; // 0=CIRCLE, 1=SQUARE
-        console.info('EditorPage: Setting paperType:', paperTypeValue, '(', this.paperType, ')');
+        // 只支持圆形团花
+        const paperTypeValue = 0; // 0=CIRCLE
+        console.info('EditorPage: Setting paperType:', paperTypeValue, '(CIRCLE)');
         this.papercutModule.setPaperType(paperTypeValue);
         
         const colorArgb = this.hexToArgb(this.paperColor);
@@ -108,9 +145,26 @@ export struct EditorPage {
       if (nativeWindow && this.papercutModule) {
         this.previewNativeWindow = nativeWindow;
         
-        // 初始化预览引擎（使用相同的配置）
-        const width = 2048;
-        const height = 2048;
+        // 获取屏幕尺寸（异步获取，先使用默认值）
+        // Native层会根据实际的NativeWindow buffer尺寸进行适配
+        let width: number = 2048;
+        let height: number = 2048;
+        
+        // 尝试异步获取窗口尺寸（不影响初始化流程）
+        window.getLastWindow(getContext(this)).then((windowClass: window.Window) => {
+          return windowClass.getWindowProperties();
+        }).then((windowProperties: window.WindowProperties) => {
+          const newWidth: number = windowProperties.windowRect.width > 0 ? windowProperties.windowRect.width : 2048;
+          const newHeight: number = windowProperties.windowRect.height > 0 ? windowProperties.windowRect.height : 2048;
+          if (newWidth !== width || newHeight !== height) {
+            console.info('EditorPage: Preview window size updated to:', newWidth, 'x', newHeight);
+            // 如果需要，可以重新初始化引擎（但通常Native层会自动适配）
+          }
+        }).catch((error: Error) => {
+          console.warn('EditorPage: Failed to get preview window size, using default:', error.message);
+        });
+        
+        // 使用默认值初始化引擎（Native层会根据实际buffer尺寸适配）
         this.papercutModule.initializeEngine(nativeWindow, width, height);
 
         // 延迟绘制预览
@@ -138,19 +192,22 @@ export struct EditorPage {
   onTouchStart(event: TouchEvent) {
     if (this.viewMode || !this.papercutModule) return;
     
+    // 如果正在缩放或平移，不处理绘制
+    if (this.isPinching || this.isPanning || (event.touches && event.touches.length > 1)) {
+      return;
+    }
+    
     if (event.touches && event.touches.length > 0) {
       const touch = event.touches[0];
       // 获取XComponent的实际尺寸（从触摸事件获取）
       // 画布尺寸是2048x2048，需要将屏幕坐标转换为画布坐标
       const canvasSize = 2048;
-      const viewScale = 1.2; // VIEW_SCALE
-      const viewOffsetY = canvasSize * 0.25; // VIEW_OFFSET_Y
+      const viewScale = 1.2 * this.scaleValue; // VIEW_SCALE * 缩放值
       
       // 获取触摸点相对于XComponent的位置
-      // 注意：touch.x和touch.y已经是相对于XComponent的坐标
-      // 需要转换为画布坐标（考虑视图变换）
-      const modelX = (touch.x - canvasSize / 2) / viewScale;
-      const modelY = (touch.y - canvasSize / 2 - viewOffsetY) / viewScale;
+      // 考虑缩放和平移
+      const modelX = (touch.x - canvasSize / 2 - this.panX) / viewScale;
+      const modelY = (touch.y - canvasSize / 2 - this.panY) / viewScale;
       
       this.papercutModule.startDrawing(modelX, modelY);
       this.isDrawing = true;
@@ -160,17 +217,21 @@ export struct EditorPage {
   }
 
   onTouchMove(event: TouchEvent) {
-    if (this.viewMode || !this.isDrawing || !this.papercutModule || !this.lastPoint) return;
+    if (this.viewMode || !this.papercutModule) return;
     
-    if (event.touches && event.touches.length > 0) {
+    // 如果正在缩放或平移，不处理绘制
+    if (this.isPinching || this.isPanning || (event.touches && event.touches.length > 1)) {
+      return;
+    }
+    
+    if (this.isDrawing && this.lastPoint && event.touches && event.touches.length > 0) {
       const touch = event.touches[0];
       const canvasSize = 2048;
-      const viewScale = 1.2; // VIEW_SCALE
-      const viewOffsetY = canvasSize * 0.25; // VIEW_OFFSET_Y
+      const viewScale = 1.2 * this.scaleValue; // VIEW_SCALE * 缩放值
       
-      // 转换为模型坐标
-      const modelX = (touch.x - canvasSize / 2) / viewScale;
-      const modelY = (touch.y - canvasSize / 2 - viewOffsetY) / viewScale;
+      // 转换为模型坐标（考虑缩放和平移）
+      const modelX = (touch.x - canvasSize / 2 - this.panX) / viewScale;
+      const modelY = (touch.y - canvasSize / 2 - this.panY) / viewScale;
       
       // 检查距离，避免点太密集
       const dx = modelX - this.lastPoint.x;
@@ -257,11 +318,67 @@ export struct EditorPage {
     router.back();
   }
 
+  async onSave() {
+    if (!this.papercutModule) {
+      console.error('EditorPage: Cannot save - papercutModule is null');
+      return;
+    }
+
+    try {
+      // 获取actions
+      const actions: Action[] = this.papercutModule.getActions();
+      
+      // 创建或更新作品
+      const work: SavedWork = {
+        id: this.work?.id || `work_${Date.now()}`,
+        paperType: this.paperType,
+        paperColor: this.paperColor,
+        foldMode: this.foldMode,
+        date: Date.now(),
+        actions: actions
+      };
+
+      // 加载现有作品列表
+      const prefs = await preferences.getPreferences(this.getContext(), 'papercut_works');
+      const worksJson: string = await prefs.get('works', '[]') as string;
+      let works: SavedWork[] = JSON.parse(worksJson) as SavedWork[];
+
+      // 更新或添加作品
+      const existingIndex = works.findIndex(w => w.id === work.id);
+      if (existingIndex >= 0) {
+        works[existingIndex] = work;
+      } else {
+        works.push(work);
+      }
+
+      // 保存作品列表
+      await prefs.put('works', JSON.stringify(works));
+      await prefs.flush();
+
+      console.info('EditorPage: Work saved successfully');
+      
+      // 跳转到Gallery页面
+      router.replaceUrl({
+        url: 'drawing/pages/GalleryPage'
+      });
+    } catch (error) {
+      console.error('EditorPage: Failed to save work:', error);
+    }
+  }
+
+  getContext() {
+    return getContext(this) as Context;
+  }
+
   onTogglePreview() {
+    // 如果当前是分屏模式，切换为预览模式
     if (this.isSplitMode) {
       this.isSplitMode = false;
+      this.showPreview = true;
+    } else {
+      // 切换预览模式：true=左右分屏预览，false=仅编辑
+      this.showPreview = !this.showPreview;
     }
-    this.showPreview = !this.showPreview;
     // 当切换到预览模式时，渲染预览
     if (this.showPreview) {
       setTimeout(() => {
@@ -271,8 +388,14 @@ export struct EditorPage {
   }
 
   onToggleSplit() {
+    // 分屏模式：同时显示编辑和预览
     this.showPreview = false;
     this.isSplitMode = !this.isSplitMode;
+    if (this.isSplitMode) {
+      setTimeout(() => {
+        this.renderPreview();
+      }, 100);
+    }
   }
 
   build() {
@@ -287,14 +410,47 @@ export struct EditorPage {
         
         Blank()
         
+        // 折法选择（在标题栏中）
+        if (!this.viewMode) {
+          Row() {
+            Text('折法:')
+              .fontSize(12)
+              .fontColor('#666666')
+              .margin({ right: 8 })
+            
+            ForEach([0, 1, 2, 3, 4, 5, 6, 7, 8], (mode: number) => {
+              Stack() {
+                Circle()
+                .width(28)
+                .height(28)
+                  .fill(this.foldMode === mode ? this.paperColor : '#E0E0E0')
+                
+                if (this.foldMode === mode) {
+                  Text(mode === 0 ? '0' : mode.toString())
+                .fontSize(11)
+                    .fontColor(Color.White)
+                }
+              }
+              .width(28)
+              .height(28)
+                .onClick(() => this.onFoldChange(mode))
+              .margin({ left: 2, right: 2 })
+            }, (mode: number) => mode.toString())
+          }
+          .height(50)
+          .justifyContent(FlexAlign.Center)
+          .alignItems(VerticalAlign.Center)
+        }
+        
+        Blank()
+        
         if (!this.viewMode) {
           Button('保存')
             .type(ButtonType.Normal)
             .backgroundColor(this.paperColor)
             .fontColor(Color.White)
             .onClick(() => {
-              // TODO: 实现保存功能
-              this.onBack();
+              this.onSave();
             })
         }
       }
@@ -307,33 +463,6 @@ export struct EditorPage {
       Row() {
         // 左侧编辑区
         Column() {
-          // 折叠模式选择（顶部居中）
-          if (!this.viewMode) {
-            Row() {
-              Text('折法:')
-                .fontSize(12)
-                .fontColor('#666666')
-                .margin({ right: 8 })
-              
-              ForEach([0, 1, 2, 3, 4, 5, 6, 7, 8], (mode: number) => {
-                Button(mode === 0 ? '0' : mode.toString())
-                  .type(ButtonType.Normal)
-                  .width(32)
-                  .height(32)
-                  .borderRadius(16)
-                  .fontSize(12)
-                  .backgroundColor(this.foldMode === mode ? this.paperColor : '#E0E0E0')
-                  .fontColor(this.foldMode === mode ? Color.White : '#666666')
-                  .onClick(() => this.onFoldChange(mode))
-              }, (mode: number) => mode.toString())
-            }
-            .width('100%')
-            .height(40)
-            .justifyContent(FlexAlign.Center)
-            .alignItems(VerticalAlign.Center)
-            .margin({ top: 10 })
-          }
-
           // 画布
           Stack() {
             XComponent({
@@ -363,7 +492,73 @@ export struct EditorPage {
               .width('100%')
               .height('100%')
               .backgroundColor('#FDF6E3')
+              .scale({ x: this.scaleValue, y: this.scaleValue, z: 1 })
+              .translate({ x: this.panX, y: this.panY, z: 0 })
+              .gesture(
+                GestureGroup(GestureMode.Exclusive,
+                  // 捏合手势 - 缩放
+                  PinchGesture()
+                    .onActionStart(() => {
+                      this.isPinching = true;
+                      this.isDrawing = false;
+                    })
+                    .onActionUpdate((event: GestureEvent) => {
+                      if (event && event.scale) {
+                        this.scaleValue = this.pinchValue * event.scale;
+                        // 限制缩放范围
+                        if (this.scaleValue < 0.5) this.scaleValue = 0.5;
+                        if (this.scaleValue > 3.0) this.scaleValue = 3.0;
+                        
+                        // 更新 C++ 引擎的缩放
+                        if (this.papercutModule) {
+                          this.papercutModule.setZoom(this.scaleValue);
+                          this.render();
+                        }
+                      }
+                    })
+                    .onActionEnd(() => {
+                      this.pinchValue = this.scaleValue;
+                      this.isPinching = false;
+                      if (this.papercutModule) {
+                        this.render();
+                      }
+                    }),
+                  // 平移手势
+                  PanGesture()
+                    .onActionStart(() => {
+                      if (!this.isPinching) {
+                        this.isPanning = true;
+                        this.isDrawing = false;
+                        this.lastPanX = this.panX;
+                        this.lastPanY = this.panY;
+                      }
+                    })
+                    .onActionUpdate((event: GestureEvent) => {
+                      if (!this.isPinching && event && event.offsetX !== undefined && event.offsetY !== undefined) {
+                        this.panX = this.lastPanX + event.offsetX;
+                        this.panY = this.lastPanY + event.offsetY;
+                        
+                        // 更新 C++ 引擎的平移
+                        if (this.papercutModule) {
+                          this.papercutModule.setPan(this.panX, this.panY);
+                          this.render();
+                        }
+                      }
+                    })
+                    .onActionEnd(() => {
+                      this.isPanning = false;
+                      if (this.papercutModule) {
+                        this.render();
+                      }
+                    })
+                )
+              )
               .onTouch((event: TouchEvent) => {
+                // 如果正在缩放或平移，不处理绘制
+                if (this.isPinching || this.isPanning || (event.touches && event.touches.length > 1)) {
+                  return;
+                }
+                
                 if (event.type === TouchType.Down) {
                   this.onTouchStart(event);
                 } else if (event.type === TouchType.Move) {
@@ -372,25 +567,96 @@ export struct EditorPage {
                   this.onTouchEnd(event);
                 }
               })
+              .onMouse((event: MouseEvent) => {
+                // 鼠标交互：右键拖拽平移，左键绘制
+                // 注意：禁用鼠标滚轮，不允许上下移动（通过不处理滚轮事件实现）
+                if (this.viewMode || !this.papercutModule) return;
+                
+                if (event.button === MOUSE_BUTTON_RIGHT) {
+                  // 右键：拖拽平移画布
+                  if (event.action === MOUSE_ACTION_PRESS) {
+                    this.isRightMouseDown = true;
+                    this.lastMouseX = event.x;
+                    this.lastMouseY = event.y;
+                  } else if (event.action === MOUSE_ACTION_MOVE && this.isRightMouseDown) {
+                    const deltaX = event.x - this.lastMouseX;
+                    const deltaY = event.y - this.lastMouseY;
+                    this.panX += deltaX;
+                    this.panY += deltaY;
+                    this.lastMouseX = event.x;
+                    this.lastMouseY = event.y;
+                    
+                    if (this.papercutModule) {
+                      this.papercutModule.setPan(this.panX, this.panY);
+                      this.render();
+                    }
+                  } else if (event.action === MOUSE_ACTION_RELEASE) {
+                    this.isRightMouseDown = false;
+                  }
+                } else if (event.button === MOUSE_BUTTON_LEFT) {
+                  // 左键：绘制/裁剪/橡皮擦
+                  const canvasSize = 2048;
+                  const viewScale = 1.2 * this.scaleValue;
+                  
+                  const modelX = (event.x - canvasSize / 2 - this.panX) / viewScale;
+                  const modelY = (event.y - canvasSize / 2 - this.panY) / viewScale;
+                  
+                  if (event.action === MOUSE_ACTION_PRESS) {
+                    this.papercutModule.startDrawing(modelX, modelY);
+                    this.isDrawing = true;
+                    const point: TouchPoint = { x: modelX, y: modelY };
+                    this.lastPoint = point;
+                  } else if (event.action === MOUSE_ACTION_MOVE && this.isDrawing && this.lastPoint) {
+                    const dx = modelX - this.lastPoint.x;
+                    const dy = modelY - this.lastPoint.y;
+                    if (dx * dx + dy * dy > 100) {
+                      this.papercutModule.addPoint(modelX, modelY);
+                      const point: TouchPoint = { x: modelX, y: modelY };
+                      this.lastPoint = point;
+                      this.render();
+                    }
+                  } else if (event.action === MOUSE_ACTION_RELEASE && this.isDrawing) {
+                    this.papercutModule.finishDrawing();
+                    this.isDrawing = false;
+                    this.lastPoint = null;
+                    this.render();
+                    if (this.showPreview || this.isSplitMode) {
+                      this.renderPreview();
+                    }
+                  }
+                }
+              })
 
             // 左侧工具栏（撤销/重做/清空）
             if (!this.viewMode) {
               Column() {
-                Button()
+                Button() {
+                  Text('↶')
+                    .fontSize(20)
+                    .fontColor('#333333')
+                }
                   .width(36)
                   .height(36)
                   .borderRadius(18)
                   .backgroundColor(Color.White)
                   .onClick(() => this.onUndo())
                 
-                Button()
+                Button() {
+                  Text('↷')
+                    .fontSize(20)
+                    .fontColor('#333333')
+                }
                   .width(36)
                   .height(36)
                   .borderRadius(18)
                   .backgroundColor(Color.White)
                   .onClick(() => this.onRedo())
                 
-                Button()
+                Button() {
+                  Text('×')
+                    .fontSize(20)
+                    .fontColor('#333333')
+                }
                   .width(36)
                   .height(36)
                   .borderRadius(18)
@@ -400,19 +666,29 @@ export struct EditorPage {
               .width(40)
               .height(120)
               .justifyContent(FlexAlign.SpaceBetween)
-              .alignItems(HorizontalAlign.Start)
-              .margin({ left: 10, bottom: 20 })
+              .alignItems(HorizontalAlign.Center)
+              .margin({ left: 10 })
               .position({ x: 0, y: '50%' })
+              .offset({ y: -60 })
             }
           }
           .width('100%')
           .layoutWeight(1)
         }
-        .width(this.isSplitMode ? '50%' : (this.showPreview ? '0%' : '100%'))
+        .width((this.isSplitMode || this.showPreview) ? '50%' : '100%')
         .layoutWeight(1)
         .backgroundColor('#FDF6E3')
 
-        // 右侧预览区
+        // 分隔线（仅在预览或分屏模式下显示）
+        if (this.showPreview || this.isSplitMode) {
+          Divider()
+            .vertical(true)
+            .strokeWidth(2)
+            .color('#CCCCCC')
+            .width(2)
+        }
+
+        // 右侧预览区（仅在预览或分屏模式下显示）
         if (this.showPreview || this.isSplitMode) {
           Column() {
             Stack() {

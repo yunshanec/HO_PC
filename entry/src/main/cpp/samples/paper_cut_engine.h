@@ -15,6 +15,7 @@
 #include <vector>
 #include <string>
 #include <memory>
+#include <chrono>
 
 // 点结构
 struct Point {
@@ -58,7 +59,7 @@ enum class ActionType {
     STROKE = 1    // 笔触
 };
 
-// 动作结构
+// 动作结构（兼容旧代码）
 struct Action {
     std::string id;
     ActionType type;
@@ -67,6 +68,68 @@ struct Action {
     int64_t timestamp;
     
     Action() : type(ActionType::CUT), tool(ToolMode::SCISSORS), timestamp(0) {}
+};
+
+// 命令接口（Command Pattern）
+class ICommand {
+public:
+    virtual ~ICommand() = default;
+    virtual void Apply(OH_Drawing_Canvas* canvas) = 0;  // 应用命令到画布
+    virtual void Revert(OH_Drawing_Canvas* canvas) = 0;  // 撤销命令
+    virtual Action ToAction() const = 0;  // 转换为Action（用于序列化）
+};
+
+// 裁剪命令
+class CutCommand : public ICommand {
+private:
+    std::vector<Point> points_;
+    std::string id_;
+    
+public:
+    CutCommand(const std::vector<Point>& points);
+    void Apply(OH_Drawing_Canvas* canvas) override;
+    void Revert(OH_Drawing_Canvas* canvas) override;
+    Action ToAction() const override;
+};
+
+// 铅笔命令
+class PencilCommand : public ICommand {
+private:
+    std::vector<Point> points_;
+    std::string id_;
+    
+public:
+    PencilCommand(const std::vector<Point>& points);
+    void Apply(OH_Drawing_Canvas* canvas) override;
+    void Revert(OH_Drawing_Canvas* canvas) override;
+    Action ToAction() const override;
+};
+
+// 橡皮命令
+class EraserCommand : public ICommand {
+private:
+    std::vector<Point> points_;
+    std::string id_;
+    
+public:
+    EraserCommand(const std::vector<Point>& points);
+    void Apply(OH_Drawing_Canvas* canvas) override;
+    void Revert(OH_Drawing_Canvas* canvas) override;
+    Action ToAction() const override;
+};
+
+// 清空命令
+class ClearCommand : public ICommand {
+private:
+    std::vector<std::unique_ptr<ICommand>> previousCommands_;
+    std::string id_;
+    
+public:
+    ClearCommand();
+    void Apply(OH_Drawing_Canvas* canvas) override;
+    void Revert(OH_Drawing_Canvas* canvas) override;
+    Action ToAction() const override;
+    void SetPreviousCommands(std::vector<std::unique_ptr<ICommand>> commands);
 };
 
 // 绘制状态
@@ -90,10 +153,12 @@ public:
     void SetPreviewWindow(OHNativeWindow* window);  // 设置预览窗口
     
     // 绘制主函数
-    void Render();
-    void RenderPreview();  // 渲染预览画布
-    void RenderInputCanvas(OH_Drawing_Canvas* canvas);  // 绘制输入画布（编辑区）
-    void RenderOutputCanvas(OH_Drawing_Canvas* canvas);  // 绘制输出画布（预览区）
+    void Render();  // 渲染主画布（InputCanvas + OffscreenCanvas合成）
+    void RenderPreview();  // 渲染预览画布（PreviewCanvas）
+    
+    // 标记层需要更新
+    void MarkInputDirty() { inputDirty_ = true; }
+    void MarkOffscreenDirty() { offscreenDirty_ = true; }
     
     // 工具操作
     void SetToolMode(ToolMode mode);
@@ -106,6 +171,7 @@ public:
     // 纸张设置
     void SetPaperType(PaperType type);
     void SetPaperColor(uint32_t color);
+    uint32_t GetPaperColor() const { return paperColor_; }
     
     // 绘制操作
     void StartDrawing(float x, float y);
@@ -130,10 +196,10 @@ public:
     void SetRotation(float rotation);
     void SetFlip(bool flipped);
     
-    // 动作管理
-    void AddAction(const Action& action);
-    std::vector<Action> GetActions() const { return actions_; }
-    void SetActions(const std::vector<Action>& actions);
+    // 动作管理（兼容旧接口）
+    void AddAction(const Action& action);  // 兼容性接口：将Action转换为Command
+    std::vector<Action> GetActions() const;  // 从命令历史生成Action列表
+    void SetActions(const std::vector<Action>& actions);  // 从Action列表重建命令历史
     
     // 坐标转换
     Point ScreenToModel(float x, float y) const;
@@ -144,20 +210,43 @@ public:
     int GetCanvasHeight() const { return canvasHeight_; }
     
 private:
-    // 绘制函数
-    void DrawPaperBase(OH_Drawing_Canvas* canvas);
+    // 3层画布架构（按照refactor.md重构）
+    void InitializeLayers(int width, int height);
+    void DestroyLayers();
+    
+    // ① InputCanvas - 交互层（只处理输入和临时绘制）
+    void RenderInputCanvas(OH_Drawing_Canvas* canvas);
+    
+    // ② OffscreenCanvas - 数据层（存储真实数据，通过命令应用）
+    void RenderOffscreenCanvas();  // 重新渲染整个OffscreenCanvas（从所有命令）
+    void ApplyCommandToOffscreenCanvas(std::unique_ptr<ICommand> cmd);
+    void RevertCommandFromOffscreenCanvas();
+    
+    // ③ PreviewCanvas - 展示层（只渲染预览，应用旋转/镜像/对称展开）
+    void RenderPreviewCanvas(OH_Drawing_Canvas* canvas);
+    
+    // 旧版兼容函数
+    void RenderOutputCanvas(OH_Drawing_Canvas* canvas);
     void DrawActions(OH_Drawing_Canvas* canvas);
-    void DrawCurrentStroke(OH_Drawing_Canvas* canvas);
-    void DrawBezierUI(OH_Drawing_Canvas* canvas);
+    
+    // 合成层（用于主渲染）
+    void CompositeLayers(OH_Drawing_Canvas* targetCanvas);  // 合成InputCanvas + OffscreenCanvas到目标画布
+    
+    // 绘制辅助函数
+    void DrawPaperBase(OH_Drawing_Canvas* canvas);
     void DrawFoldLines(OH_Drawing_Canvas* canvas);
     
-    // 路径绘制
-    void DrawPath(OH_Drawing_Canvas* canvas, const std::vector<Point>& points, bool closePath);
-    void DrawPencilStroke(OH_Drawing_Canvas* canvas, const std::vector<Point>& points);
-    void ErasePencilStroke(OH_Drawing_Canvas* canvas, const std::vector<Point>& points);
+    // 绘制扇形路径（用于裁剪）
+    OH_Drawing_Path* CreateSectorPath(float centerX, float centerY, float radius, bool isFullPaper, float sectorAngle);
     
-    // 对称变换
-    Point TransformPoint(const Point& p, int segment, float sectorAngle) const;
+public:
+    // 路径绘制（用于命令，需要public以便命令类访问）
+    static void DrawPath(OH_Drawing_Canvas* canvas, const std::vector<Point>& points, bool closePath);
+    static void DrawPencilStroke(OH_Drawing_Canvas* canvas, const std::vector<Point>& points);
+    static void ErasePencilStroke(OH_Drawing_Canvas* canvas, const std::vector<Point>& points, uint32_t backgroundColor);
+
+private:
+    
     
     // 贝塞尔曲线计算
     std::vector<Point> CalculateSplinePoints(const std::vector<Point>& points, bool closed) const;
@@ -168,6 +257,22 @@ private:
     int canvasWidth_;
     int canvasHeight_;
     
+    // 3层画布架构（按照refactor.md）
+    // ① InputCanvas - 交互层（临时绘制）
+    OH_Drawing_Bitmap* inputBitmap_;           // InputCanvas bitmap
+    OH_Drawing_Canvas* inputCanvas_;           // InputCanvas canvas
+    bool inputDirty_;                          // InputCanvas是否需要重绘
+    
+    // ② OffscreenCanvas - 数据层（真实数据存储）
+    OH_Drawing_Bitmap* offscreenBitmap_;       // OffscreenCanvas bitmap（数据真相层）
+    OH_Drawing_Canvas* offscreenCanvas_;       // OffscreenCanvas canvas
+    bool offscreenDirty_;                      // OffscreenCanvas是否需要重绘
+    
+    // ③ PreviewCanvas - 展示层（预览渲染，在RenderPreview时使用）
+    // 注意：PreviewCanvas不需要离屏bitmap，它直接从OffscreenCanvas读取并应用变换
+    
+    bool layersInitialized_;                   // 层是否已初始化
+    
     // 状态
     ToolMode currentToolMode_;
     FoldMode foldMode_;
@@ -175,9 +280,13 @@ private:
     uint32_t paperColor_;
     DrawState drawState_;
     
-    // 动作列表
+    // 命令历史（使用命令模式）
+    std::vector<std::unique_ptr<ICommand>> commandHistory_;  // 已应用的命令
+    std::vector<std::unique_ptr<ICommand>> redoStack_;       // 可重做的命令
+    
+    // 动作列表（兼容旧接口，从命令生成）
     std::vector<Action> actions_;
-    std::vector<Action> redoStack_;
+    std::vector<Action> actionRedoStack_;  // Action类型的重做栈（兼容旧代码）
     
     // 当前绘制
     bool isDrawing_;
@@ -190,8 +299,9 @@ private:
     
     // 常量
     static constexpr int CANVAS_SIZE = 2048;
-    static constexpr float PAPER_RADIUS_RATIO = 0.40f;
-    static constexpr float CLIP_RADIUS_RATIO = 1.5f;
+    static constexpr float SECTOR_RADIUS_RATIO = 0.5f;  // 扇形半径为画布高度的一半
+    static constexpr float PAPER_RADIUS_RATIO = 0.4f;  // 纸张半径为画布尺寸的比例
+    static constexpr float CLIP_RADIUS_RATIO = 0.4f;    // 裁剪区域半径为画布尺寸的比例
     static constexpr float VIEW_SCALE = 1.2f;
     static constexpr float VIEW_OFFSET_Y_RATIO = 0.25f;
 };
