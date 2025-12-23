@@ -1,18 +1,6 @@
 {
   "string": [
     {
-      "name": "module_desc",
-      "value": "module description"
-    },
-    {
-      "name": "EntryAbility_desc",
-      "value": "description"
-    },
-    {
-      "name": "EntryAbility_label",
-      "value": "NDKAPIDrawing"
-    },
-    {
       "name": "DrawingBrushAccess",
       "value": "drawing_brush"
     },
@@ -203,6 +191,22 @@
     {
       "name": "DrawingCustomPixelMap",
       "value": "CustomPixelMap"
+    },
+    {
+      "name": "module_desc",
+      "value": "剪纸艺术Demo"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "剪纸艺术应用"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "剪纸艺术"
+    },
+    {
+      "name": "app_name",
+      "value": "剪纸艺术"
     }
   ]
 }

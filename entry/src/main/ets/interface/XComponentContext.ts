@@ -17,4 +17,17 @@ import { image } from '@kit.ImageKit';
 export default interface XComponentContext {
   draw(canvasType:string, shapeType: string):void;
   drawImage(canvasType:string, shapeType: string, pixelmap: image.PixelMap):void;
+  drawPaperCut(nativeWindow: string | number): void;
+  drawPaperCutPreview(nativeWindow: string | number): void;
+  initializeEngine(nativeWindow: string | number, width: number, height: number): void;
+  startDrawing(x: number, y: number): void;
+  addPoint(x: number, y: number): void;
+  finishDrawing(): void;
+  setToolMode(mode: number): void;
+  setFoldMode(mode: number): void;
+  setPaperType(type: number): void;
+  setPaperColor(color: number): void;
+  undo(): void;
+  redo(): void;
+  clear(): void;
 };

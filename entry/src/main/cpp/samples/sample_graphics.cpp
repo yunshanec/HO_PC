@@ -361,43 +361,13 @@ void SampleGraphics::DisPlayGPU()
 }
 
 void SampleGraphics::InitDrawFunction(std::string id)
-{
-    this->drawFunctionMap_.insert({"BrushBasic", &SampleGraphics::DrawBrushBasic});
-    this->drawFunctionMap_.insert({"MixedMode", &SampleGraphics::DrawMixedMode});
-    this->drawFunctionMap_.insert({"LinearGradient", &SampleGraphics::DrawShaderEffect});
-    this->drawFunctionMap_.insert({"ColorFilter", &SampleGraphics::DrawColorFilter});
-    this->drawFunctionMap_.insert({"MaskFilterBrush", &SampleGraphics::DrawMaskFilterBrush});
-    
-    this->drawFunctionMap_.insert({"PenBasic", &SampleGraphics::DrawPenBasic});
-    this->drawFunctionMap_.insert({"Stroke", &SampleGraphics::DrawStroke});
-    this->drawFunctionMap_.insert({"MiterLimit", &SampleGraphics::DrawMiterLimit});
-    this->drawFunctionMap_.insert({"ImageFilter", &SampleGraphics::DrawImageFilter});
-    this->drawFunctionMap_.insert({"PathEffect", &SampleGraphics::DrawPathEffect});
-    this->drawFunctionMap_.insert({"PenLinearGradient", &SampleGraphics::DrawPenLinearGradient});
-    this->drawFunctionMap_.insert({"MaskFilterPen", &SampleGraphics::DrawMaskFilterPen});
-    
-    this->drawFunctionMap_.insert({"RectBasic", &SampleGraphics::DrawRectBasic});
-    this->drawFunctionMap_.insert({"RectIntersect", &SampleGraphics::DrawRectIntersect});
-    this->drawFunctionMap_.insert({"RectJoin", &SampleGraphics::DrawRectJoin});
-    this->drawFunctionMap_.insert({"RoundRect", &SampleGraphics::DrawRoundRect});
-    
+{ 
     this->drawFunctionMap_.insert({"PathBasic", &SampleGraphics::DrawPathBasic});
     this->drawFunctionMap_.insert({"PathTo", &SampleGraphics::DrawPathTo});
     this->drawFunctionMap_.insert({"PathAdd", &SampleGraphics::DrawPathAdd});
     this->drawFunctionMap_.insert({"PathStar", &SampleGraphics::DrawStar});
     this->drawFunctionMap_.insert({"BuildFromSvgString", &SampleGraphics::BuildFromSvgString});
     
-    this->drawFunctionMap_.insert({"MatrixBasic", &SampleGraphics::DrawMatrixBasic});
-    this->drawFunctionMap_.insert({"TranslationOperation", &SampleGraphics::DrawTranslationOperation});
-    this->drawFunctionMap_.insert({"PreTranslationOperation", &SampleGraphics::DrawPreTranslationOperation});
-    this->drawFunctionMap_.insert({"PostTranslationOperation", &SampleGraphics::DrawPostTranslationOperation});
-    this->drawFunctionMap_.insert({"RotationOperation", &SampleGraphics::DrawRotationOperation});
-    this->drawFunctionMap_.insert({"PreRotationOperation", &SampleGraphics::DrawPreRotationOperation});
-    this->drawFunctionMap_.insert({"PostRotationOperation", &SampleGraphics::DrawPostRotationOperation});
-    this->drawFunctionMap_.insert({"ScaleOperation", &SampleGraphics::DrawScaleOperation});
-    this->drawFunctionMap_.insert({"PreScaleOperation", &SampleGraphics::DrawPreScaleOperation});
-    this->drawFunctionMap_.insert({"PostScaleOperation", &SampleGraphics::DrawPostScaleOperation});
-    this->drawFunctionMap_.insert({"ConcatOperation", &SampleGraphics::DrawConcatOperation});
     
     this->drawFunctionMap_.insert({"CanvasCreate", &SampleGraphics::DrawCreateCanvas});
     this->drawFunctionMap_.insert({"ClipOperation", &SampleGraphics::DrawClipOperation});
@@ -406,10 +376,6 @@ void SampleGraphics::InitDrawFunction(std::string id)
     this->drawFunctionMap_.insert({"ConcatMatrix", &SampleGraphics::DrawCanvasConcatMatrix});
     this->drawFunctionMap_.insert({"DrawRegion", &SampleGraphics::DrawRegion});
     
-    this->drawFunctionMap_.insert({"LocalPixelMap", &SampleGraphics::DrawPixelMapRect});
-    this->drawFunctionMap_.insert({"CustomPixelMap", &SampleGraphics::DrawCustomPixelMap});
-    this->drawFunctionMap_.insert({"DrawBitmap", &SampleGraphics::DrawBitmap});
-    this->drawFunctionMap_.insert({"DrawImage", &SampleGraphics::DrawImage});
 }
 
 void SampleGraphics::DoRender(SampleGraphics *render, char* canvasType, char* shapeType)

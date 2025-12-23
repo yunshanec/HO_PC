@@ -44,6 +44,14 @@ PluginManager::~PluginManager()
         }
     }
     pluginRenderMap_.clear();
+
+    for (auto iter = paperCutRenderMap_.begin(); iter != paperCutRenderMap_.end(); ++iter) {
+        if (iter->second != nullptr) {
+            delete iter->second;
+            iter->second = nullptr;
+        }
+    }
+    paperCutRenderMap_.clear();
 }
 
 void PluginManager::Export(napi_env env, napi_value exports)
@@ -78,12 +86,26 @@ void PluginManager::Export(napi_env env, napi_value exports)
     auto context = PluginManager::GetInstance();
     if ((context != nullptr) && (nativeXComponent != nullptr)) {
         context->SetNativeXComponent(id, nativeXComponent);
-        auto render = context->GetRender(id);
-        if (render != nullptr) {
-            render->RegisterCallback(nativeXComponent);
-            render->Export(env, exports);
+        
+        // 根据ID判断使用哪个渲染器
+        // 如果ID包含"editor"或"preview"，使用PaperCutRender
+        if (id.find("editor") != std::string::npos || id.find("preview") != std::string::npos || 
+            id.find("xcomponent_editor") != std::string::npos || id.find("xcomponent_preview") != std::string::npos) {
+            auto paperCutRender = context->GetPaperCutRender(id);
+            if (paperCutRender != nullptr) {
+                paperCutRender->RegisterCallback(nativeXComponent);
+                paperCutRender->Export(env, exports);
+            } else {
+                SAMPLE_LOGE("paperCutRender is nullptr");
+            }
         } else {
-            SAMPLE_LOGE("render is nullptr");
+            auto render = context->GetRender(id);
+            if (render != nullptr) {
+                render->RegisterCallback(nativeXComponent);
+                render->Export(env, exports);
+            } else {
+                SAMPLE_LOGE("render is nullptr");
+            }
         }
     }
 }
@@ -117,4 +139,14 @@ SampleGraphics *PluginManager::GetRender(std::string &id)
         return instance;
     }
     return pluginRenderMap_[id];
+}
+
+PaperCutRender *PluginManager::GetPaperCutRender(std::string &id)
+{
+    if (paperCutRenderMap_.find(id) == paperCutRenderMap_.end()) {
+        PaperCutRender *instance = PaperCutRender::GetInstance(id);
+        paperCutRenderMap_[id] = instance;
+        return instance;
+    }
+    return paperCutRenderMap_[id];
 }

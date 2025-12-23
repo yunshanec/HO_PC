@@ -13,77 +13,28 @@
  * limitations under the License.
  */
 
-import router from '@ohos.router';
-
-interface Item {
-  text: string;
-}
-
-
-const operationUrls: string[] = [
-  'drawing/pages/BrushDrawing',
-  'drawing/pages/PenDrawing',
-  'drawing/pages/RectDrawing',
-  'drawing/pages/PathDrawing',
-  'drawing/pages/MatrixDrawing',
-  'drawing/pages/CanvasDrawing',
-  'drawing/pages/PixelMapDrawing',
-  'drawing/pages/BitmapDrawing',
-  'drawing/pages/ImageDrawing'
-];
+import { router } from '@kit.ArkUI';
 
 @Entry
 @Component
 struct Index {
-  ResourceToString(resource: Resource): string {
-    return getContext(this).resourceManager.getStringSync(resource);
+  aboutToAppear() {
+    // 直接跳转到GalleryPage
+    router.replaceUrl({
+      url: 'drawing/pages/GalleryPage'
+    });
   }
-
-  @State listItem: Item[] = [
-    { text: this.ResourceToString($r('app.string.DrawingBrushAccess')) },
-    { text: this.ResourceToString($r('app.string.DrawingPenAccess')) },
-    { text: this.ResourceToString($r('app.string.DrawingRectAccess')) },
-    { text: this.ResourceToString($r('app.string.DrawingPathAccess')) },
-    { text: this.ResourceToString($r('app.string.DrawingMatrixAccess')) },
-    { text: this.ResourceToString($r('app.string.DrawingCanvasAccess')) },
-    { text: this.ResourceToString($r('app.string.DrawingPixelmapAccess')) },
-    { text: this.ResourceToString($r('app.string.DrawingBitmapAccess')) },
-    { text: this.ResourceToString($r('app.string.DrawingImageAccess')) }
-  ]
 
   build() {
     Column() {
-      List() {
-        ForEach(this.listItem, (item: Item, index) => {
-          ListItem() {
-            Row() {
-              Blank().width('4%')
-              Text(item.text)
-                .fontSize(16)
-                .fontColor('black')
-                .width('90%')
-              Image($r('app.media.right'))
-                .height(12)
-                .width(12)
-            }
-            .onClick(() => {
-              router.pushUrl({
-                url: operationUrls[index]
-              });
-            })
-            .border({ radius: 20 })
-            .width('90%')
-            .height('8%')
-            .backgroundColor(Color.White)
-            .margin({ top: 12, left: 15, right: 8 })
-          }
-        })
-      }
-      .height('90%')
-      .width('100%')
+      LoadingProgress()
+        .width(50)
+        .height(50)
     }
     .width('100%')
     .height('100%')
-    .backgroundColor('#F1F3F5')
+    .justifyContent(FlexAlign.Center)
+    .alignItems(HorizontalAlign.Center)
+    .backgroundColor('#FDF6E3')
   }
 }

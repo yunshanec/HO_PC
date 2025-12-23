@@ -48,30 +48,6 @@ public:
     void SetHeight(uint64_t height);
     void SetNativeWindow(OHNativeWindow *nativeWindow);
     
-    // brush
-    void DrawBrushBasic(OH_Drawing_Canvas *canvas);
-    void DrawMixedMode(OH_Drawing_Canvas *canvas);
-    void DrawShaderEffect1Line(OH_Drawing_Canvas *canvas);
-    void DrawShaderEffect2Line(OH_Drawing_Canvas *canvas);
-    void DrawShaderEffect(OH_Drawing_Canvas *canvas);
-    void DrawColorFilter(OH_Drawing_Canvas *canvas);
-    void DrawMaskFilterBrush(OH_Drawing_Canvas *canvas);
-    
-    // pen
-    void DrawPenBasic(OH_Drawing_Canvas *canvas);
-    void DrawPenLinearGradient(OH_Drawing_Canvas *canvas);
-    void DrawMiterLimit(OH_Drawing_Canvas *canvas);
-    void DrawStroke(OH_Drawing_Canvas *canvas);
-    void DrawPathEffect(OH_Drawing_Canvas *canvas);
-    void DrawImageFilter(OH_Drawing_Canvas *canvas);
-    void DrawMaskFilterPen(OH_Drawing_Canvas *canvas);
-    
-    // rect
-    void DrawRectBasic(OH_Drawing_Canvas *canvas);
-    void DrawRectIntersect(OH_Drawing_Canvas *canvas);
-    void DrawRectJoin(OH_Drawing_Canvas *canvas);
-    void DrawRoundRect(OH_Drawing_Canvas *canvas);
-    
     // path
     OH_Drawing_Path* DrawPathBasicTriangle(float startX, float startY, int32_t w);
     void DrawPathBasic(OH_Drawing_Canvas *canvas);
@@ -86,19 +62,6 @@ public:
     void DrawStar(OH_Drawing_Canvas *canvas);
     void BuildFromSvgString(OH_Drawing_Canvas *canvas);
     
-    // matrix
-    void DrawMatrixBasic(OH_Drawing_Canvas *canvas);
-    void DrawTranslationOperation(OH_Drawing_Canvas *canvas);
-    void DrawPreTranslationOperation(OH_Drawing_Canvas *canvas);
-    void DrawPostTranslationOperation(OH_Drawing_Canvas *canvas);
-    void DrawRotationOperation(OH_Drawing_Canvas *canvas);
-    void DrawPreRotationOperation(OH_Drawing_Canvas *canvas);
-    void DrawPostRotationOperation(OH_Drawing_Canvas *canvas);
-    void DrawScaleOperation(OH_Drawing_Canvas *canvas);
-    void DrawPreScaleOperation(OH_Drawing_Canvas *canvas);
-    void DrawPostScaleOperation(OH_Drawing_Canvas *canvas);
-    void DrawConcatOperation(OH_Drawing_Canvas *canvas);
-    
     // Canvas
     void DrawCreateCanvas(OH_Drawing_Canvas *canvas);
     void DrawClipOperation(OH_Drawing_Canvas *canvas);
@@ -106,11 +69,6 @@ public:
     void CanvasSaveLayerOperation(OH_Drawing_Canvas *canvas);
     void DrawCanvasConcatMatrix(OH_Drawing_Canvas *canvas);
     void DrawRegion(OH_Drawing_Canvas *canvas);
-    
-    void DrawCustomPixelMap(OH_Drawing_Canvas *canvas);
-    void DrawPixelMapRect(OH_Drawing_Canvas *canvas);
-    void DrawBitmap(OH_Drawing_Canvas *canvas);
-    void DrawImage(OH_Drawing_Canvas *canvas);
     
     // 创建画布及绘图结果显示
     void Prepare();

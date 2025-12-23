@@ -15,13 +15,10 @@ include_directories(${NATIVERENDER_ROOT_PATH}
 add_library(entry SHARED
     napi_init.cpp
     samples/sample_graphics.cpp
-    samples/sample_brush.cpp
     samples/sample_canvas.cpp
-    samples/sample_matrix.cpp
     samples/sample_path.cpp
-    samples/sample_pen.cpp
-    samples/sample_pixelmap.cpp
-    samples/sample_rect.cpp
+    samples/paper_cut_engine.cpp
+    samples/paper_cut_render.cpp
     plugin/plugin_manager.cpp
     utils/adaptation_util.cpp
     )

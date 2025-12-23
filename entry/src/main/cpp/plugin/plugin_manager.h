@@ -22,6 +22,7 @@
 #include <string>
 #include <unordered_map>
 #include "samples/sample_graphics.h"
+#include "samples/paper_cut_render.h"
 
 class PluginManager {
 public:
@@ -31,10 +32,12 @@ public:
 
     void SetNativeXComponent(std::string &id, OH_NativeXComponent *nativeXComponent);
     SampleGraphics *GetRender(std::string &id);
+    PaperCutRender *GetPaperCutRender(std::string &id);
     void Export(napi_env env, napi_value exports);
 private:
 
     std::unordered_map<std::string, OH_NativeXComponent *> nativeXComponentMap_;
     std::unordered_map<std::string, SampleGraphics *> pluginRenderMap_;
+    std::unordered_map<std::string, PaperCutRender *> paperCutRenderMap_;
 };
 #endif // PLUGIN_MANAGER_H
