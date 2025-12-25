@@ -36,6 +36,7 @@ public:
     static napi_value GetActions(napi_env env, napi_callback_info info);
     static napi_value SetZoom(napi_env env, napi_callback_info info);
     static napi_value SetPan(napi_env env, napi_callback_info info);
+    static napi_value SetPreviewWindow(napi_env env, napi_callback_info info);
     
     // 导出NAPI接口
     void Export(napi_env env, napi_value exports);

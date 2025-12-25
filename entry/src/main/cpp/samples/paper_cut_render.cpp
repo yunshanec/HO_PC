@@ -165,7 +165,8 @@ void PaperCutRender::Export(napi_env env, napi_value exports)
         {"clear", nullptr, Clear, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"getActions", nullptr, GetActions, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"setZoom", nullptr, SetZoom, nullptr, nullptr, nullptr, napi_default, nullptr},
-        {"setPan", nullptr, SetPan, nullptr, nullptr, nullptr, napi_default, nullptr}
+        {"setPan", nullptr, SetPan, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"setPreviewWindow", nullptr, SetPreviewWindow, nullptr, nullptr, nullptr, napi_default, nullptr}
     };
     
     if (napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc) != napi_ok) {
@@ -508,6 +509,27 @@ napi_value PaperCutRender::SetPan(napi_env env, napi_callback_info info)
     napi_get_value_double(env, args[1], &y);
     
     render->engine_->SetPan(static_cast<float>(x), static_cast<float>(y));
+    return nullptr;
+}
+
+napi_value PaperCutRender::SetPreviewWindow(napi_env env, napi_callback_info info)
+{
+    // 注意: previewWindow实际上是通过OnSurfaceCreatedCB回调设置的
+    // 这个函数主要是为了保持接口一致性，接受nativeWindow ID参数但不做实际处理
+    // 因为窗口已经在回调中设置了
+    size_t argc = 1;
+    napi_value args[1];
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    
+    PaperCutRender *render = GetRenderFromArgs(env, info);
+    if (!render || !render->engine_) {
+        LOGE("SetPreviewWindow: render or engine is null");
+        return nullptr;
+    }
+    
+    // 窗口已经通过OnSurfaceCreatedCB回调设置，这里只记录日志
+    LOGI("SetPreviewWindow called (window already set via callback)");
+    
     return nullptr;
 }
 

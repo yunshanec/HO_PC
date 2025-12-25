@@ -91,21 +91,7 @@ export struct EditorPage {
         // Native层会根据实际的NativeWindow buffer尺寸进行适配
         let width: number = 2048;
         let height: number = 2048;
-        
-        // 尝试异步获取窗口尺寸（不影响初始化流程）
-        window.getLastWindow(getContext(this)).then((windowClass: window.Window) => {
-          return windowClass.getWindowProperties();
-        }).then((windowProperties: window.WindowProperties) => {
-          const newWidth: number = windowProperties.windowRect.width > 0 ? windowProperties.windowRect.width : 2048;
-          const newHeight: number = windowProperties.windowRect.height > 0 ? windowProperties.windowRect.height : 2048;
-          if (newWidth !== width || newHeight !== height) {
-            console.info('EditorPage: Window size updated to:', newWidth, 'x', newHeight);
-            // 如果需要，可以重新初始化引擎（但通常Native层会自动适配）
-          }
-        }).catch((error: Error) => {
-          console.warn('EditorPage: Failed to get window size, using default:', error.message);
-        });
-        
+
         // 使用默认值初始化引擎（Native层会根据实际buffer尺寸适配）
         console.info('EditorPage: Initializing engine with size:', width, 'x', height);
         this.papercutModule.initializeEngine(nativeWindow, width, height);
@@ -129,7 +115,7 @@ export struct EditorPage {
         setTimeout(() => {
           console.info('EditorPage: Rendering initial canvas...');
           this.render();
-        }, 300);
+        }, 200);
       }
     } catch (error) {
       console.error('EditorPage: Error in onXComponentLoad:', JSON.stringify(error));
@@ -141,33 +127,9 @@ export struct EditorPage {
     try {
       const nativeWindow = this.previewXComponentController.getXComponentSurfaceId();
       console.info('EditorPage: Got preview surfaceId:', nativeWindow);
-
       if (nativeWindow && this.papercutModule) {
         this.previewNativeWindow = nativeWindow;
-        
-        // 获取屏幕尺寸（异步获取，先使用默认值）
-        // Native层会根据实际的NativeWindow buffer尺寸进行适配
-        let width: number = 2048;
-        let height: number = 2048;
-        
-        // 尝试异步获取窗口尺寸（不影响初始化流程）
-        window.getLastWindow(getContext(this)).then((windowClass: window.Window) => {
-          return windowClass.getWindowProperties();
-        }).then((windowProperties: window.WindowProperties) => {
-          const newWidth: number = windowProperties.windowRect.width > 0 ? windowProperties.windowRect.width : 2048;
-          const newHeight: number = windowProperties.windowRect.height > 0 ? windowProperties.windowRect.height : 2048;
-          if (newWidth !== width || newHeight !== height) {
-            console.info('EditorPage: Preview window size updated to:', newWidth, 'x', newHeight);
-            // 如果需要，可以重新初始化引擎（但通常Native层会自动适配）
-          }
-        }).catch((error: Error) => {
-          console.warn('EditorPage: Failed to get preview window size, using default:', error.message);
-        });
-        
-        // 使用默认值初始化引擎（Native层会根据实际buffer尺寸适配）
-        this.papercutModule.initializeEngine(nativeWindow, width, height);
-
-        // 延迟绘制预览
+        this.papercutModule.setPreviewWindow(nativeWindow);
         setTimeout(() => {
           this.renderPreview();
         }, 200);
@@ -177,12 +139,14 @@ export struct EditorPage {
     }
   }
 
+  // 渲染草稿和裁剪层
   render() {
     if (this.nativeWindow && this.papercutModule) {
       this.papercutModule.drawPaperCut(this.nativeWindow);
     }
   }
 
+  // 渲染参考层
   renderPreview() {
     if (this.previewNativeWindow && this.papercutModule) {
       this.papercutModule.drawPaperCutPreview(this.previewNativeWindow);

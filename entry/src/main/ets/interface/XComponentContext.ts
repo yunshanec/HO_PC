@@ -21,6 +21,7 @@ export default interface XComponentContext {
   drawPaperCut(nativeWindow: string | number): void;
   drawPaperCutPreview(nativeWindow: string | number): void;
   initializeEngine(nativeWindow: string | number, width: number, height: number): void;
+  setPreviewWindow(nativeWindow: string | number): void;
   startDrawing(x: number, y: number): void;
   addPoint(x: number, y: number): void;
   finishDrawing(): void;

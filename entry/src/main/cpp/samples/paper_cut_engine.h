@@ -232,6 +232,9 @@ private:
     // 合成层（用于主渲染）
     void CompositeLayers(OH_Drawing_Canvas* targetCanvas);  // 合成InputCanvas + OffscreenCanvas到目标画布
     
+    // 视图变换辅助函数
+    void ApplyViewTransform(OH_Drawing_Canvas* canvas, float centerX, float centerY, float height);
+    
     // 绘制辅助函数
     void DrawPaperBase(OH_Drawing_Canvas* canvas);
     void DrawFoldLines(OH_Drawing_Canvas* canvas);
