@@ -117,52 +117,34 @@ void PaperCutEngine::Render()
     OH_Drawing_CanvasClear(canvas, 0xFFFDF6E3);  // 米色背景
     
     // 使用3层架构：先应用视图变换，然后合成InputCanvas + OffscreenCanvas
-    int canvasWidth = OH_Drawing_CanvasGetWidth(canvas);
-    int canvasHeight = OH_Drawing_CanvasGetHeight(canvas);
-    float centerX = canvasWidth * 0.5f;
-    float paperRadius = std::min(canvasWidth, canvasHeight) * PAPER_RADIUS_RATIO;
-    
+    // WebEditor 对齐：逻辑画布固定为 2048（canvasWidth_/canvasHeight_），并以中心为原点进行渲染
+    float centerX = canvasWidth_ * 0.5f;
+    float centerY = canvasHeight_ * 0.5f;
+    float paperRadius = std::min(canvasWidth_, canvasHeight_) * PAPER_RADIUS_RATIO;
     bool isFullPaper = (foldMode_ == FoldMode::ZERO);
-    float centerY = isFullPaper ? (canvasHeight * 0.5f) : (canvasHeight - paperRadius);
-    float sectorAngle = isFullPaper ? (2.0f * M_PI) : ((2.0f * M_PI) / (static_cast<int>(foldMode_) + 1));
+    // WebEditor 对齐：折叠模式使用 2*N 段（旋转 + 镜像）来生成完整图案
+    int totalSegments = isFullPaper ? 1 : (static_cast<int>(foldMode_) * 2);
+    float sectorAngle = isFullPaper ? (2.0f * M_PI) : ((2.0f * M_PI) / totalSegments);
     
-    // 保存状态并应用视图变换（使用统一的变换函数）
+    // 保存状态并应用视图变换（中心原点坐标系）
     OH_Drawing_CanvasSave(canvas);
-    ApplyViewTransform(canvas, centerX, centerY, static_cast<float>(canvasHeight));
+    ApplyViewTransform(canvas, centerX, centerY, static_cast<float>(canvasHeight_));
     
-    // 设置裁剪区域 - 纸张逻辑层
+    // 设置裁剪区域 - 纸张逻辑层（中心原点）
     OH_Drawing_CanvasSave(canvas);
     OH_Drawing_Path* clipPath = OH_Drawing_PathCreate();
-    
-    if (isFullPaper) {
-        if (paperType_ == PaperType::CIRCLE) {
-            OH_Drawing_PathAddCircle(clipPath, 0, 0, paperRadius, PATH_DIRECTION_CCW);
-        } else {
-            OH_Drawing_PathAddRect(clipPath, -paperRadius, -paperRadius,
-                                  paperRadius, paperRadius, PATH_DIRECTION_CCW);
-        }
+    if (paperType_ == PaperType::CIRCLE) {
+        OH_Drawing_PathAddCircle(clipPath, 0, 0, paperRadius, PATH_DIRECTION_CCW);
     } else {
-        float clipRadius = std::min(canvasWidth, canvasHeight) * CLIP_RADIUS_RATIO;
-        float startAngle = -M_PI / 2.0f;
-        float endAngle = startAngle + sectorAngle;
-        OH_Drawing_PathMoveTo(clipPath, 0, 0);
-        for (float angle = startAngle; angle <= endAngle; angle += 0.1f) {
-            float x = cos(angle) * clipRadius;
-            float y = sin(angle) * clipRadius;
-            OH_Drawing_PathLineTo(clipPath, x, y);
-        }
-        OH_Drawing_PathLineTo(clipPath, 0, 0);
-        OH_Drawing_PathClose(clipPath);
+        OH_Drawing_PathAddRect(clipPath, -paperRadius, -paperRadius, paperRadius, paperRadius, PATH_DIRECTION_CCW);
     }
-    
     OH_Drawing_CanvasClipPath(canvas, clipPath, OH_Drawing_CanvasClipOp::INTERSECT, true);
     OH_Drawing_PathDestroy(clipPath);
-    
-    // 合成OffscreenCanvas和InputCanvas
-    // 注意:由于目标Canvas已经应用了视图变换,我们需要将OffscreenCanvas的内容映射到变换后的坐标系统
+
+    // 合成 Offscreen + Input（两层 bitmap 都以中心为原点贴回）
     CompositeLayers(canvas);
-    
-    OH_Drawing_CanvasRestore(canvas);  // 结束裁剪
+
+    OH_Drawing_CanvasRestore(canvas);  // 结束纸张裁剪
     
     // 绘制折叠线等UI元素（在变换后的坐标系统中）
     DrawFoldLines(canvas);
@@ -324,7 +306,8 @@ void PaperCutEngine::RenderInputCanvas(OH_Drawing_Canvas* canvas)
                                   paperRadius, paperRadius, PATH_DIRECTION_CCW);
         }
     } else {
-        float sectorAngle = (2.0f * M_PI) / (static_cast<int>(foldMode_) + 1);
+        int totalSegments = static_cast<int>(foldMode_) * 2;
+        float sectorAngle = (2.0f * M_PI) / totalSegments;
         float startAngle = -M_PI / 2.0f;
         float endAngle = startAngle + sectorAngle;
         OH_Drawing_PathMoveTo(clipPath, 0, 0);
@@ -418,9 +401,10 @@ void PaperCutEngine::RenderOutputCanvas(OH_Drawing_Canvas* canvas)
         DrawActions(canvas);
     } else {
         // 折叠模式：应用镜像对称展开
-        // 对于N折，有N+1个扇形，每个扇形角度为 360/(N+1)
-        float sectorAngle = (2.0f * M_PI) / (static_cast<int>(foldMode_) + 1);
-        int totalSegments = static_cast<int>(foldMode_) + 1;
+        // WebEditor 对齐：使用 2*N 段（偶数段旋转，奇数段按边界镜像）
+        int totalSegments = static_cast<int>(foldMode_) * 2;
+        float sectorAngle = (2.0f * M_PI) / totalSegments;
+        float startAngle = -M_PI / 2.0f;
         
         for (int i = 0; i < totalSegments; i++) {
             OH_Drawing_CanvasSave(canvas);
@@ -429,9 +413,9 @@ void PaperCutEngine::RenderOutputCanvas(OH_Drawing_Canvas* canvas)
                 // 偶数段：旋转 i * sectorAngle
                 OH_Drawing_CanvasRotate(canvas, i * sectorAngle * 180.0f / M_PI, 0, 0);
             } else {
-                // 奇数段：旋转并镜像（Y轴翻转）
-                float boundary = -M_PI / 2.0f + ((i + 1) / 2) * sectorAngle;
-                OH_Drawing_CanvasRotate(canvas, 2 * boundary * 180.0f / M_PI, 0, 0);
+                // 奇数段：绕边界做镜像（rotate 2*boundary + scaleY(-1)）
+                float boundary = startAngle + ((i + 1) / 2) * sectorAngle;
+                OH_Drawing_CanvasRotate(canvas, (2.0f * boundary) * 180.0f / M_PI, 0, 0);
                 OH_Drawing_CanvasScale(canvas, 1.0f, -1.0f);
             }
             
@@ -449,23 +433,21 @@ void PaperCutEngine::ApplyViewTransform(OH_Drawing_Canvas* canvas, float centerX
     if (!canvas) return;
     
     bool isFullPaper = (foldMode_ == FoldMode::ZERO);
-    float sectorAngle = isFullPaper ? (2.0f * M_PI) : ((2.0f * M_PI) / (static_cast<int>(foldMode_) + 1));
+    int totalSegments = isFullPaper ? 1 : (static_cast<int>(foldMode_) * 2);
+    float sectorAngle = isFullPaper ? (2.0f * M_PI) : ((2.0f * M_PI) / totalSegments);
     float baseRotation = isFullPaper ? 0 : -sectorAngle / 2.0f;
     float totalRotation = baseRotation + drawState_.rotation;
     
-    // 应用视图变换矩阵（按参考代码的顺序）:
-    // translate(center) -> scale(flip) -> scale(zoom) -> translate(pan) -> rotate -> translate(-center)
+    // WebEditor 对齐：以中心为原点的坐标系（不再 translate(-center) 回到左上角）
+    // translate(center) -> scale(flip) -> scale(zoom) -> translate(pan + VIEW_OFFSET_Y) -> rotate
     OH_Drawing_CanvasTranslate(canvas, centerX, centerY);
-    
-    // Apply flip in mapping
     if (drawState_.isFlipped) {
         OH_Drawing_CanvasScale(canvas, -1.0f, 1.0f);
     }
-    
     OH_Drawing_CanvasScale(canvas, VIEW_SCALE * drawState_.zoom, VIEW_SCALE * drawState_.zoom);
-    OH_Drawing_CanvasTranslate(canvas, drawState_.pan.x, drawState_.pan.y + height * VIEW_OFFSET_Y_RATIO);
+    // VIEW_OFFSET_Y 以逻辑画布(2048)为基准
+    OH_Drawing_CanvasTranslate(canvas, drawState_.pan.x, drawState_.pan.y + canvasHeight_ * VIEW_OFFSET_Y_RATIO);
     OH_Drawing_CanvasRotate(canvas, totalRotation * 180.0f / M_PI, 0, 0);
-    OH_Drawing_CanvasTranslate(canvas, -centerX, -centerY);
 }
 
 void PaperCutEngine::DrawPaperBase(OH_Drawing_Canvas* canvas)
@@ -517,7 +499,8 @@ void PaperCutEngine::DrawFoldLines(OH_Drawing_Canvas* canvas)
     float clipRadius = std::min(width, height) * CLIP_RADIUS_RATIO;
     
     bool isFullPaper = (foldMode_ == FoldMode::ZERO);
-    float sectorAngle = isFullPaper ? (2.0f * M_PI) : ((2.0f * M_PI) / (static_cast<int>(foldMode_) + 1));
+    int totalSegments = isFullPaper ? 1 : (static_cast<int>(foldMode_) * 2);
+    float sectorAngle = isFullPaper ? (2.0f * M_PI) : ((2.0f * M_PI) / totalSegments);
     
     OH_Drawing_Pen* pen = OH_Drawing_PenCreate();
     OH_Drawing_PenSetColor(pen, 0x80000000);  // 半透明黑色
@@ -1373,40 +1356,19 @@ void PaperCutEngine::RevertCommandFromOffscreenCanvas()
 void PaperCutEngine::CompositeLayers(OH_Drawing_Canvas* targetCanvas)
 {
     if (!targetCanvas || !layersInitialized_) return;
+    const bool isFullPaper = (foldMode_ == FoldMode::ZERO);
     
     // 如果OffscreenCanvas需要更新，先渲染它
     if (offscreenDirty_) {
         RenderOffscreenCanvas();
     }
     
-    // 由于目标Canvas已经应用了视图变换,而OffscreenCanvas和InputCanvas使用屏幕坐标存储,
-    // 我们需要在绘制bitmap之前重置变换,这样bitmap就会在屏幕坐标中绘制,
-    // 然后变换会自动应用到bitmap的内容上
-    
-    // 保存当前变换状态
-    OH_Drawing_CanvasSave(targetCanvas);
-    
-    // 计算变换参数(需要和Render方法中的变换一致)
-    float centerX = canvasWidth_ * 0.5f;
-    float paperRadius = std::min(canvasWidth_, canvasHeight_) * PAPER_RADIUS_RATIO;
-    bool isFullPaper = (foldMode_ == FoldMode::ZERO);
-    float centerY = isFullPaper ? (canvasHeight_ * 0.5f) : (canvasHeight_ - paperRadius);
-    float sectorAngle = isFullPaper ? (2.0f * M_PI) : ((2.0f * M_PI) / (static_cast<int>(foldMode_) + 1));
-    float baseRotation = isFullPaper ? 0 : -sectorAngle / 2.0f;
-    
-    // 重置变换到屏幕坐标(撤销Render方法中应用的变换)
-    OH_Drawing_CanvasTranslate(targetCanvas, centerX, centerY);  // 移到中心
-    OH_Drawing_CanvasRotate(targetCanvas, -(baseRotation + drawState_.rotation) * 180.0f / M_PI, 0, 0);
-    OH_Drawing_CanvasTranslate(targetCanvas, -drawState_.pan.x, -(drawState_.pan.y + canvasHeight_ * VIEW_OFFSET_Y_RATIO));
-    OH_Drawing_CanvasScale(targetCanvas, 1.0f / (VIEW_SCALE * drawState_.zoom), 1.0f / (VIEW_SCALE * drawState_.zoom));
-    if (drawState_.isFlipped) {
-        OH_Drawing_CanvasScale(targetCanvas, -1.0f, 1.0f);
-    }
-    OH_Drawing_CanvasTranslate(targetCanvas, -centerX, -centerY);
-    
-    // 绘制OffscreenCanvas（数据层）- 现在在屏幕坐标中绘制
+    // 目标 canvas 已经处在“中心原点 + 视图变换”坐标系中：
+    // bitmap（2048x2048）内容本身以像素坐标存储，因此需要以 (-CENTER,-CENTER) 贴回
+    const float halfW = canvasWidth_ * 0.5f;
+    const float halfH = canvasHeight_ * 0.5f;
     if (offscreenBitmap_) {
-        OH_Drawing_CanvasDrawBitmap(targetCanvas, offscreenBitmap_, 0, 0);
+        OH_Drawing_CanvasDrawBitmap(targetCanvas, offscreenBitmap_, -halfW, -halfH);
     }
     
     // 更新InputCanvas（交互层，临时绘制）
@@ -1417,16 +1379,15 @@ void PaperCutEngine::CompositeLayers(OH_Drawing_Canvas* targetCanvas)
         // 绘制当前正在进行的绘制（实时预览）- 使用模型坐标
         if (isDrawing_ && currentPoints_.size() > 1) {
             // 转换模型坐标到屏幕坐标进行绘制
-            float modelCenterX = canvasWidth_ * 0.5f;
-            float modelCenterY = isFullPaper ? (canvasHeight_ * 0.5f) : (canvasHeight_ - paperRadius);
-            
             OH_Drawing_CanvasSave(inputCanvas_);
-            OH_Drawing_CanvasTranslate(inputCanvas_, modelCenterX, modelCenterY);
+            OH_Drawing_CanvasTranslate(inputCanvas_, halfW, halfH);
 
-            // ① InputCanvas 必须裁剪到当前扇形(sector)区域（交互约束）
-            if (!isFullPaper) {
+            // WebEditor 对齐：
+            // - 草稿(铅笔/橡皮)必须被扇形 clip 约束
+            // - 剪刀金色预览线应在 clip 外也可见（Web 在 restore clip 后绘制）
+            if (!isFullPaper && currentToolMode_ != ToolMode::SCISSORS) {
                 float clipRadius = std::min(canvasWidth_, canvasHeight_) * CLIP_RADIUS_RATIO;
-                float sectorAngle2 = (2.0f * M_PI) / (static_cast<int>(foldMode_) + 1);
+                float sectorAngle2 = (2.0f * M_PI) / (static_cast<int>(foldMode_) * 2);
                 float startAngle = -M_PI / 2.0f;
                 float endAngle = startAngle + sectorAngle2;
                 OH_Drawing_Path* sectorPath = OH_Drawing_PathCreate();
@@ -1452,13 +1413,21 @@ void PaperCutEngine::CompositeLayers(OH_Drawing_Canvas* targetCanvas)
                     OH_Drawing_PathClose(previewPath);
                 }
                 
+                // WebEditor：金色半透明填充 + 描边
                 OH_Drawing_Brush* brush = OH_Drawing_BrushCreate();
-                OH_Drawing_BrushSetColor(brush, 0x59FFD700);  // 半透明金色
+                OH_Drawing_BrushSetColor(brush, 0x59FFD700);
                 OH_Drawing_CanvasAttachBrush(inputCanvas_, brush);
                 OH_Drawing_CanvasDrawPath(inputCanvas_, previewPath);
                 OH_Drawing_CanvasDetachBrush(inputCanvas_);
-                
                 OH_Drawing_BrushDestroy(brush);
+
+                OH_Drawing_Pen* pen = OH_Drawing_PenCreate();
+                OH_Drawing_PenSetColor(pen, 0xFFFFD700);
+                OH_Drawing_PenSetWidth(pen, 5.0f);
+                OH_Drawing_CanvasAttachPen(inputCanvas_, pen);
+                OH_Drawing_CanvasDrawPath(inputCanvas_, previewPath);
+                OH_Drawing_CanvasDetachPen(inputCanvas_);
+                OH_Drawing_PenDestroy(pen);
                 OH_Drawing_PathDestroy(previewPath);
             } else if (currentToolMode_ == ToolMode::DRAFT_PEN) {
                 DrawPencilStroke(inputCanvas_, currentPoints_);
@@ -1473,11 +1442,8 @@ void PaperCutEngine::CompositeLayers(OH_Drawing_Canvas* targetCanvas)
     
     // 绘制InputCanvas（交互层）
     if (inputBitmap_) {
-        OH_Drawing_CanvasDrawBitmap(targetCanvas, inputBitmap_, 0, 0);
+        OH_Drawing_CanvasDrawBitmap(targetCanvas, inputBitmap_, -halfW, -halfH);
     }
-    
-    // 恢复变换
-    OH_Drawing_CanvasRestore(targetCanvas);
 }
 
 bool PaperCutEngine::IsPointInSector(float x, float y) const
@@ -1494,8 +1460,8 @@ bool PaperCutEngine::IsPointInSector(float x, float y) const
         return false;
     }
     
-    // 扇形角度范围：[-pi/2, -pi/2 + sectorAngle]
-    float sectorAngle = (2.0f * M_PI) / (static_cast<int>(foldMode_) + 1);
+    // 扇形角度范围：[-pi/2, -pi/2 + sectorAngle]，WebEditor：sectorAngle = 2pi/(2*fold)
+    float sectorAngle = (2.0f * M_PI) / (static_cast<int>(foldMode_) * 2);
     float angle = atan2(y, x);
     // 平移到 [0, 2pi) 再以 startAngle 为零基准
     float start = -M_PI / 2.0f;
@@ -1508,8 +1474,10 @@ bool PaperCutEngine::IsPointInSector(float x, float y) const
 
 void PaperCutEngine::RenderPreviewCanvas(OH_Drawing_Canvas* canvas)
 {
-    // PreviewCanvas：只读 OffscreenCanvas，并做对称展开；绝不修改数据层
-    if (!canvas || !layersInitialized_ || !offscreenBitmap_) return;
+    // WebEditor 对齐的 PreviewCanvas：
+    // - 只渲染“纸张 + CUT 镂空”（不显示铅笔草稿）
+    // - 使用 2*N 段旋转/镜像展开
+    if (!canvas || !layersInitialized_) return;
     
     int width = OH_Drawing_CanvasGetWidth(canvas);
     int height = OH_Drawing_CanvasGetHeight(canvas);
@@ -1517,7 +1485,7 @@ void PaperCutEngine::RenderPreviewCanvas(OH_Drawing_Canvas* canvas)
     float centerY = height * 0.5f;
     
     bool isFullPaper = (foldMode_ == FoldMode::ZERO);
-    int totalSegments = isFullPaper ? 1 : (static_cast<int>(foldMode_) + 1);
+    int totalSegments = isFullPaper ? 1 : (static_cast<int>(foldMode_) * 2);
     float sectorAngle = isFullPaper ? (2.0f * M_PI) : ((2.0f * M_PI) / totalSegments);
     
     // Offscreen(固定 2048) -> Preview(窗口尺寸) 的比例映射，保证预览缩放一致
@@ -1525,32 +1493,46 @@ void PaperCutEngine::RenderPreviewCanvas(OH_Drawing_Canvas* canvas)
     float dstSize = static_cast<float>(std::min(width, height));
     float scale = (srcSize > 0.0f) ? (dstSize / srcSize) : 1.0f;
     
+    // ClearCommand 分界：只渲染最后一次 clear 之后的裁剪
+    size_t startIndex = 0;
+    for (size_t i = 0; i < commandHistory_.size(); i++) {
+        if (dynamic_cast<ClearCommand*>(commandHistory_[i].get()) != nullptr) {
+            startIndex = i + 1;
+        }
+    }
+
     // 预览以画布中心为原点进行展开
     OH_Drawing_CanvasSave(canvas);
     OH_Drawing_CanvasTranslate(canvas, centerX, centerY);
     OH_Drawing_CanvasScale(canvas, scale, scale);
+
+    // 纸张底色（只绘制一次）
+    DrawPaperBase(canvas);
     
+    float startAngle = -M_PI / 2.0f;
     for (int i = 0; i < totalSegments; i++) {
         OH_Drawing_CanvasSave(canvas);
         
-        // 旋转到第 i 段
-        OH_Drawing_CanvasRotate(canvas, (i * sectorAngle) * 180.0f / M_PI, 0, 0);
-        
-        // 奇数段镜像（折纸对称）
-        if (!isFullPaper && (i % 2 == 1)) {
-            OH_Drawing_CanvasScale(canvas, -1.0f, 1.0f);
+        // WebEditor：偶数段旋转；奇数段按边界镜像（rotate 2*boundary + scaleY(-1)）
+        if (isFullPaper) {
+            // no-op
+        } else if (i % 2 == 0) {
+            OH_Drawing_CanvasRotate(canvas, (i * sectorAngle) * 180.0f / M_PI, 0, 0);
+        } else {
+            float boundary = startAngle + ((i + 1) / 2) * sectorAngle;
+            OH_Drawing_CanvasRotate(canvas, (2.0f * boundary) * 180.0f / M_PI, 0, 0);
+            OH_Drawing_CanvasScale(canvas, 1.0f, -1.0f);
         }
 
-        // 每段必须裁剪到扇形区域，避免“整张 bitmap 覆盖”导致前一段的镂空被后续段填回
+        // WebEditor：每段只在“扇形 wedge”内应用裁剪（CLIP_RADIUS 足够大）
         if (!isFullPaper) {
-            float paperRadius = std::min(canvasWidth_, canvasHeight_) * PAPER_RADIUS_RATIO;
-            float startAngle = -M_PI / 2.0f;
+            float clipRadius = std::min(canvasWidth_, canvasHeight_) * CLIP_RADIUS_RATIO;
             float endAngle = startAngle + sectorAngle;
             OH_Drawing_Path* sectorPath = OH_Drawing_PathCreate();
             OH_Drawing_PathMoveTo(sectorPath, 0, 0);
             for (float angle = startAngle; angle <= endAngle; angle += 0.05f) {
-                float sx = cos(angle) * paperRadius;
-                float sy = sin(angle) * paperRadius;
+                float sx = cos(angle) * clipRadius;
+                float sy = sin(angle) * clipRadius;
                 OH_Drawing_PathLineTo(sectorPath, sx, sy);
             }
             OH_Drawing_PathLineTo(sectorPath, 0, 0);
@@ -1558,11 +1540,20 @@ void PaperCutEngine::RenderPreviewCanvas(OH_Drawing_Canvas* canvas)
             OH_Drawing_CanvasClipPath(canvas, sectorPath, OH_Drawing_CanvasClipOp::INTERSECT, true);
             OH_Drawing_PathDestroy(sectorPath);
         }
-        
-        // 把 OffscreenBitmap 绘制到以(0,0)为中心的坐标系中
-        // OffscreenBitmap 内容的模型原点在 bitmap 的中心位置
-        OH_Drawing_CanvasTranslate(canvas, -canvasWidth_ * 0.5f, -canvasHeight_ * 0.5f);
-        OH_Drawing_CanvasDrawBitmap(canvas, offscreenBitmap_, 0, 0);
+
+        // 应用所有 CUT 命令（destination-out 等价效果）
+        for (size_t k = startIndex; k < commandHistory_.size(); k++) {
+            auto* cut = dynamic_cast<CutCommand*>(commandHistory_[k].get());
+            if (!cut) continue;
+            // 复用 CutCommand::Apply 的逻辑（clip DIFFERENCE + 透明填充）
+            cut->Apply(canvas);
+        }
+
+        // WebEditor：实时剪刀预览（在预览层做 cut 模拟），但仍只在 wedge 内生效
+        if (isDrawing_ && currentToolMode_ == ToolMode::SCISSORS && currentPoints_.size() > 1) {
+            CutCommand liveCut(currentPoints_);
+            liveCut.Apply(canvas);
+        }
         
         OH_Drawing_CanvasRestore(canvas);
     }

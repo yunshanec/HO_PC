@@ -274,6 +274,16 @@ export struct EditorPage {
   onFoldChange(mode: number) {
     this.foldMode = mode;
     if (this.papercutModule) {
+      // WebEditor 对齐：切换折法时重置视图（缩放/平移），避免“旧视图状态”影响新扇形交互体验
+      this.scaleValue = 1.0;
+      this.pinchValue = 1.0;
+      this.panX = 0;
+      this.panY = 0;
+      this.lastPanX = 0;
+      this.lastPanY = 0;
+      this.papercutModule.setZoom(this.scaleValue);
+      this.papercutModule.setPan(0, 0);
+
       this.papercutModule.setFoldMode(mode);
       this.render();
       if (this.showPreview || this.isSplitMode) {

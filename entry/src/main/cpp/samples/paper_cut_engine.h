@@ -308,7 +308,8 @@ private:
     static constexpr int CANVAS_SIZE = 2048;
     static constexpr float SECTOR_RADIUS_RATIO = 0.5f;  // 扇形半径为画布高度的一半
     static constexpr float PAPER_RADIUS_RATIO = 0.4f;  // 纸张半径为画布尺寸的比例
-    static constexpr float CLIP_RADIUS_RATIO = 0.4f;    // 裁剪区域半径为画布尺寸的比例
+    // WebEditor 对齐：扇形裁剪半径需要足够大，保证在缩放/旋转/平移下扇形覆盖整个纸张区域
+    static constexpr float CLIP_RADIUS_RATIO = 1.5f;    // 扇形裁剪半径为画布尺寸的比例
     static constexpr float VIEW_SCALE = 1.2f;
     static constexpr float VIEW_OFFSET_Y_RATIO = 0.25f;
 };
