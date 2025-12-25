@@ -138,10 +138,15 @@ void PaperCutEngine::Render()
     // 清空画布
     OH_Drawing_CanvasClear(canvas, 0xFFFDF6E3);  // 米色背景
     
-    // 使用3层架构：先应用视图变换，然后合成InputCanvas + OffscreenCanvas
-    // WebEditor 对齐：逻辑画布固定为 2048（canvasWidth_/canvasHeight_），并以中心为原点进行渲染
-    float centerX = canvasWidth_ * 0.5f;
-    float centerY = canvasHeight_ * 0.5f;
+    // 使用3层架构：先应用视图变换，然后合成 InputCanvas + OffscreenCanvas
+    // 关键：目标渲染 buffer 尺寸会随布局变化（如 预览/编辑切换、分屏），
+    // 但逻辑画布仍固定为 2048。这里必须按当前 buffer 尺寸做比例映射，否则会出现“畸形/偏移”。
+    const float srcSize = static_cast<float>(std::min(canvasWidth_, canvasHeight_));
+    const float dstSize = static_cast<float>(std::min(static_cast<int>(width), static_cast<int>(height)));
+    const float renderScale = (srcSize > 0.0f) ? (dstSize / srcSize) : 1.0f;
+
+    float centerX = static_cast<float>(width) * 0.5f;
+    float centerY = static_cast<float>(height) * 0.5f;
     float paperRadius = std::min(canvasWidth_, canvasHeight_) * PAPER_RADIUS_RATIO;
     bool isFullPaper = (foldMode_ == FoldMode::ZERO);
     // WebEditor 对齐：折叠模式使用 2*N 段（旋转 + 镜像）来生成完整图案
@@ -150,7 +155,7 @@ void PaperCutEngine::Render()
     
     // 保存状态并应用视图变换（中心原点坐标系）
     OH_Drawing_CanvasSave(canvas);
-    ApplyViewTransform(canvas, centerX, centerY, static_cast<float>(canvasHeight_));
+    ApplyViewTransform(canvas, centerX, centerY, renderScale);
     
     // 设置裁剪区域 - 纸张逻辑层（中心原点）
     OH_Drawing_CanvasSave(canvas);
@@ -313,15 +318,20 @@ void PaperCutEngine::RenderInputCanvas(OH_Drawing_Canvas* canvas)
     int width = OH_Drawing_CanvasGetWidth(canvas);
     int height = OH_Drawing_CanvasGetHeight(canvas);
     float centerX = width * 0.5f;
-    float paperRadius = std::min(width, height) * PAPER_RADIUS_RATIO;
-    float clipRadius = std::min(width, height) * CLIP_RADIUS_RATIO;
+    float centerY = height * 0.5f;
+    // 逻辑(2048) -> 目标 buffer 的比例映射
+    float srcSize = static_cast<float>(std::min(canvasWidth_, canvasHeight_));
+    float dstSize = static_cast<float>(std::min(width, height));
+    float renderScale = (srcSize > 0.0f) ? (dstSize / srcSize) : 1.0f;
+
+    // 纸张/裁剪半径在“模型坐标(2048)”中计算，依赖 renderScale 映射到屏幕
+    float paperRadius = std::min(canvasWidth_, canvasHeight_) * PAPER_RADIUS_RATIO;
+    float clipRadius = std::min(canvasWidth_, canvasHeight_) * CLIP_RADIUS_RATIO;
     
     bool isFullPaper = (foldMode_ == FoldMode::ZERO);
-    float centerY = isFullPaper ? (height * 0.5f) : (height - paperRadius);
-    
     // 保存状态并应用视图变换（使用统一的变换函数）
     OH_Drawing_CanvasSave(canvas);
-    ApplyViewTransform(canvas, centerX, centerY, static_cast<float>(height));
+    ApplyViewTransform(canvas, centerX, centerY, renderScale);
     
     // 设置裁剪区域 - 纸张逻辑层（在变换后的坐标系统中，中心是(0,0)）
     OH_Drawing_CanvasSave(canvas);
@@ -453,8 +463,8 @@ void PaperCutEngine::RenderOutputCanvas(OH_Drawing_Canvas* canvas)
     OH_Drawing_CanvasRestore(canvas);
 }
 
-// 应用视图变换矩阵（根据参考代码的坐标映射逻辑）
-void PaperCutEngine::ApplyViewTransform(OH_Drawing_Canvas* canvas, float centerX, float centerY, float height)
+// 应用视图变换矩阵（将逻辑画布 2048 映射到目标 buffer 尺寸）
+void PaperCutEngine::ApplyViewTransform(OH_Drawing_Canvas* canvas, float centerX, float centerY, float renderScale)
 {
     if (!canvas) return;
     
@@ -470,7 +480,9 @@ void PaperCutEngine::ApplyViewTransform(OH_Drawing_Canvas* canvas, float centerX
     if (drawState_.isFlipped) {
         OH_Drawing_CanvasScale(canvas, -1.0f, 1.0f);
     }
-    OH_Drawing_CanvasScale(canvas, VIEW_SCALE * drawState_.zoom, VIEW_SCALE * drawState_.zoom);
+    // renderScale：将“逻辑画布像素(2048)”缩放到当前 buffer 的最短边，避免分屏/旋转后偏移畸形
+    const float s = VIEW_SCALE * drawState_.zoom * renderScale;
+    OH_Drawing_CanvasScale(canvas, s, s);
     // VIEW_OFFSET_Y 以逻辑画布(2048)为基准
     OH_Drawing_CanvasTranslate(canvas, drawState_.pan.x, drawState_.pan.y + canvasHeight_ * VIEW_OFFSET_Y_RATIO);
     OH_Drawing_CanvasRotate(canvas, totalRotation * 180.0f / M_PI, 0, 0);

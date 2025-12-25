@@ -237,7 +237,10 @@ private:
     bool IsPointInSector(float x, float y) const;
     
     // 视图变换辅助函数
-    void ApplyViewTransform(OH_Drawing_Canvas* canvas, float centerX, float centerY, float height);
+    // 将“逻辑画布(2048)”坐标映射到当前渲染目标(buffer)尺寸：
+    // - centerX/centerY 以目标 canvas 像素为基准（通常为 width/2,height/2）
+    // - renderScale = min(dstW,dstH) / min(canvasWidth_,canvasHeight_)
+    void ApplyViewTransform(OH_Drawing_Canvas* canvas, float centerX, float centerY, float renderScale);
     
     // 绘制辅助函数
     void DrawPaperBase(OH_Drawing_Canvas* canvas);
