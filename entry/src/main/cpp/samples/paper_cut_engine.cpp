@@ -19,6 +19,27 @@
 #define LOGI(...) ((void)OH_LOG_Print(LOG_APP, LOG_INFO, LOG_DOMAIN, "PaperCutEngine", __VA_ARGS__))
 #define LOGE(...) ((void)OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_DOMAIN, "PaperCutEngine", __VA_ARGS__))
 
+namespace {
+// 用真圆弧生成扇形 wedge，避免 lineTo 采样造成的“锯齿/折线感”
+OH_Drawing_Path* CreateWedgePath(float radius, float startAngleRad, float sweepAngleRad)
+{
+    OH_Drawing_Path* path = OH_Drawing_PathCreate();
+    const float startX = cos(startAngleRad) * radius;
+    const float startY = sin(startAngleRad) * radius;
+    const float startDeg = startAngleRad * 180.0f / static_cast<float>(M_PI);
+    const float sweepDeg = sweepAngleRad * 180.0f / static_cast<float>(M_PI);
+    
+    OH_Drawing_PathMoveTo(path, 0, 0);
+    OH_Drawing_PathLineTo(path, startX, startY);
+    OH_Drawing_Rect* rect = OH_Drawing_RectCreate(-radius, -radius, radius, radius);
+    OH_Drawing_PathAddArc(path, rect, startDeg, sweepDeg);
+    OH_Drawing_RectDestroy(rect);
+    OH_Drawing_PathLineTo(path, 0, 0);
+    OH_Drawing_PathClose(path);
+    return path;
+}
+} // namespace
+
 PaperCutEngine::PaperCutEngine()
     : nativeWindow_(nullptr)
     , previewWindow_(nullptr)
@@ -144,15 +165,8 @@ void PaperCutEngine::Render()
         // WebEditor 对齐：折叠模式仅显示/操作 wedge（扇形裁剪）
         const float clipRadius = std::min(canvasWidth_, canvasHeight_) * CLIP_RADIUS_RATIO;
         const float startAngle = -M_PI / 2.0f;
-        const float endAngle = startAngle + sectorAngle;
-        OH_Drawing_PathMoveTo(clipPath, 0, 0);
-        for (float angle = startAngle; angle <= endAngle; angle += 0.05f) {
-            float x = cos(angle) * clipRadius;
-            float y = sin(angle) * clipRadius;
-            OH_Drawing_PathLineTo(clipPath, x, y);
-        }
-        OH_Drawing_PathLineTo(clipPath, 0, 0);
-        OH_Drawing_PathClose(clipPath);
+        OH_Drawing_PathDestroy(clipPath);
+        clipPath = CreateWedgePath(clipRadius, startAngle, sectorAngle);
     }
     OH_Drawing_CanvasClipPath(canvas, clipPath, OH_Drawing_CanvasClipOp::INTERSECT, true);
     OH_Drawing_PathDestroy(clipPath);
@@ -162,9 +176,7 @@ void PaperCutEngine::Render()
 
     OH_Drawing_CanvasRestore(canvas);  // 结束纸张裁剪
     
-    // 绘制折叠线等UI元素（在变换后的坐标系统中）
-    DrawFoldLines(canvas);
-    
+    // 不再绘制折叠/扇形边界引导线（用户要求去掉黑线）
     OH_Drawing_CanvasRestore(canvas);  // 结束全局变换
     
     // 获取bitmap的像素数据
@@ -383,9 +395,6 @@ void PaperCutEngine::RenderInputCanvas(OH_Drawing_Canvas* canvas)
         OH_Drawing_BrushDestroy(previewBrush);
         OH_Drawing_PathDestroy(previewPath);
     }
-    
-    // 绘制扇形/纸张边界线（在变换后的坐标系统中）
-    DrawFoldLines(canvas);
     
     OH_Drawing_CanvasRestore(canvas);  // 结束视图变换
 }
@@ -1404,16 +1413,7 @@ void PaperCutEngine::CompositeLayers(OH_Drawing_Canvas* targetCanvas)
                 float clipRadius = std::min(canvasWidth_, canvasHeight_) * CLIP_RADIUS_RATIO;
                 float sectorAngle2 = (2.0f * M_PI) / (static_cast<int>(foldMode_) * 2);
                 float startAngle = -M_PI / 2.0f;
-                float endAngle = startAngle + sectorAngle2;
-                OH_Drawing_Path* sectorPath = OH_Drawing_PathCreate();
-                OH_Drawing_PathMoveTo(sectorPath, 0, 0);
-                for (float angle = startAngle; angle <= endAngle; angle += 0.05f) {
-                    float sx = cos(angle) * clipRadius;
-                    float sy = sin(angle) * clipRadius;
-                    OH_Drawing_PathLineTo(sectorPath, sx, sy);
-                }
-                OH_Drawing_PathLineTo(sectorPath, 0, 0);
-                OH_Drawing_PathClose(sectorPath);
+                OH_Drawing_Path* sectorPath = CreateWedgePath(clipRadius, startAngle, sectorAngle2);
                 OH_Drawing_CanvasClipPath(inputCanvas_, sectorPath, OH_Drawing_CanvasClipOp::INTERSECT, true);
                 OH_Drawing_PathDestroy(sectorPath);
             }
@@ -1542,16 +1542,7 @@ void PaperCutEngine::RenderPreviewCanvas(OH_Drawing_Canvas* canvas)
         // WebEditor：每段只在“扇形 wedge”内应用裁剪（CLIP_RADIUS 足够大）
         if (!isFullPaper) {
             float clipRadius = std::min(canvasWidth_, canvasHeight_) * CLIP_RADIUS_RATIO;
-            float endAngle = startAngle + sectorAngle;
-            OH_Drawing_Path* sectorPath = OH_Drawing_PathCreate();
-            OH_Drawing_PathMoveTo(sectorPath, 0, 0);
-            for (float angle = startAngle; angle <= endAngle; angle += 0.05f) {
-                float sx = cos(angle) * clipRadius;
-                float sy = sin(angle) * clipRadius;
-                OH_Drawing_PathLineTo(sectorPath, sx, sy);
-            }
-            OH_Drawing_PathLineTo(sectorPath, 0, 0);
-            OH_Drawing_PathClose(sectorPath);
+            OH_Drawing_Path* sectorPath = CreateWedgePath(clipRadius, startAngle, sectorAngle);
             OH_Drawing_CanvasClipPath(canvas, sectorPath, OH_Drawing_CanvasClipOp::INTERSECT, true);
             OH_Drawing_PathDestroy(sectorPath);
         }

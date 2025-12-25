@@ -311,7 +311,8 @@ private:
     // WebEditor 对齐：扇形裁剪半径需要足够大，保证在缩放/旋转/平移下扇形覆盖整个纸张区域
     static constexpr float CLIP_RADIUS_RATIO = 1.5f;    // 扇形裁剪半径为画布尺寸的比例
     static constexpr float VIEW_SCALE = 1.2f;
-    static constexpr float VIEW_OFFSET_Y_RATIO = 0.25f;
+    // Web 版为了构图把画布整体下移；本项目需求是“默认居中展示”，因此设为 0
+    static constexpr float VIEW_OFFSET_Y_RATIO = 0.0f;
 };
 
 #endif // PAPERCUTTING_PAPER_CUT_ENGINE_H
