@@ -110,9 +110,10 @@ class EraserCommand : public ICommand {
 private:
     std::vector<Point> points_;
     std::string id_;
+    uint32_t backgroundColor_ = 0xFFC4161C;
     
 public:
-    EraserCommand(const std::vector<Point>& points);
+    EraserCommand(const std::vector<Point>& points, uint32_t backgroundColor);
     void Apply(OH_Drawing_Canvas* canvas) override;
     void Revert(OH_Drawing_Canvas* canvas) override;
     Action ToAction() const override;
@@ -231,6 +232,9 @@ private:
     
     // 合成层（用于主渲染）
     void CompositeLayers(OH_Drawing_Canvas* targetCanvas);  // 合成InputCanvas + OffscreenCanvas到目标画布
+    
+    // 输入约束：判定点是否在当前扇形(sector)范围内（用于 InputCanvas 数据约束）
+    bool IsPointInSector(float x, float y) const;
     
     // 视图变换辅助函数
     void ApplyViewTransform(OH_Drawing_Canvas* canvas, float centerX, float centerY, float height);

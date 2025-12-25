@@ -8,9 +8,10 @@
 #include <hilog/log.h>
 #include <unordered_map>
 
-#define LOG_TAG "PaperCutRender"
-#define LOGI(...) ((void)OH_LOG_Print(LOG_APP, LOG_INFO, LOG_DOMAIN, LOG_TAG, __VA_ARGS__))
-#define LOGE(...) ((void)OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_DOMAIN, LOG_TAG, __VA_ARGS__))
+// hilog/log.h 已定义 LOG_TAG（可能为 NULL），避免宏重定义带来的告警/潜在 Werror
+static constexpr const char* LOG_LABEL = "PaperCutRender";
+#define LOGI(...) ((void)OH_LOG_Print(LOG_APP, LOG_INFO, LOG_DOMAIN, LOG_LABEL, __VA_ARGS__))
+#define LOGE(...) ((void)OH_LOG_Print(LOG_APP, LOG_ERROR, LOG_DOMAIN, LOG_LABEL, __VA_ARGS__))
 
 std::unordered_map<std::string, PaperCutRender *> PaperCutRender::g_instance;
 
@@ -121,7 +122,10 @@ static void OnSurfaceCreatedCB(OH_NativeXComponent *component, void *window)
     uint64_t height;
     int32_t xSize = OH_NativeXComponent_GetXComponentSize(component, window, &width, &height);
     if ((xSize == OH_NATIVEXCOMPONENT_RESULT_SUCCESS) && (render != nullptr)) {
-        LOGI("PaperCutRender xComponent width = %{public}llu, height = %{public}llu", width, height);
+        // %{public}llu 期望 unsigned long long，避免不同架构下 uint64_t typedef 导致的格式告警
+        LOGI("PaperCutRender xComponent width = %{public}llu, height = %{public}llu",
+             static_cast<unsigned long long>(width),
+             static_cast<unsigned long long>(height));
     }
 }
 
@@ -164,6 +168,7 @@ void PaperCutRender::Export(napi_env env, napi_value exports)
         {"redo", nullptr, Redo, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"clear", nullptr, Clear, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"getActions", nullptr, GetActions, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"setActions", nullptr, SetActions, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"setZoom", nullptr, SetZoom, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"setPan", nullptr, SetPan, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"setPreviewWindow", nullptr, SetPreviewWindow, nullptr, nullptr, nullptr, napi_default, nullptr}
@@ -463,6 +468,116 @@ napi_value PaperCutRender::GetActions(napi_env env, napi_callback_info info)
     }
     
     return result;
+}
+
+napi_value PaperCutRender::SetActions(napi_env env, napi_callback_info info)
+{
+    size_t argc = 1;
+    napi_value args[1];
+    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+    
+    PaperCutRender *render = GetRenderFromArgs(env, info);
+    if (!render || !render->engine_) {
+        return nullptr;
+    }
+    
+    if (argc < 1) {
+        LOGE("SetActions: insufficient arguments");
+        return nullptr;
+    }
+    
+    bool isArray = false;
+    if (napi_is_array(env, args[0], &isArray) != napi_ok || !isArray) {
+        LOGE("SetActions: arg0 is not array");
+        return nullptr;
+    }
+    
+    uint32_t length = 0;
+    napi_get_array_length(env, args[0], &length);
+    
+    std::vector<Action> actions;
+    actions.reserve(length);
+    
+    for (uint32_t i = 0; i < length; i++) {
+        napi_value actionObj;
+        if (napi_get_element(env, args[0], i, &actionObj) != napi_ok) {
+            continue;
+        }
+        
+        Action action;
+        action.id = std::to_string(i);
+        action.type = ActionType::STROKE;
+        action.tool = ToolMode::DRAFT_PEN;
+        action.timestamp = 0;
+        
+        // id
+        napi_value idValue;
+        if (napi_get_named_property(env, actionObj, "id", &idValue) == napi_ok) {
+            size_t strLen = 0;
+            napi_get_value_string_utf8(env, idValue, nullptr, 0, &strLen);
+            if (strLen > 0) {
+                std::vector<char> buf(strLen + 1, '\0');
+                size_t readLen = 0;
+                napi_get_value_string_utf8(env, idValue, buf.data(), buf.size(), &readLen);
+                action.id = std::string(buf.data(), readLen);
+            }
+        }
+        
+        // type (0=CUT, 1=STROKE)
+        napi_value typeValue;
+        int32_t typeInt = 1;
+        if (napi_get_named_property(env, actionObj, "type", &typeValue) == napi_ok) {
+            napi_get_value_int32(env, typeValue, &typeInt);
+        }
+        action.type = (typeInt == 0) ? ActionType::CUT : ActionType::STROKE;
+        
+        // tool (0..3)
+        napi_value toolValue;
+        int32_t toolInt = 2;
+        if (napi_get_named_property(env, actionObj, "tool", &toolValue) == napi_ok) {
+            napi_get_value_int32(env, toolValue, &toolInt);
+        }
+        action.tool = static_cast<ToolMode>(toolInt);
+        
+        // timestamp
+        napi_value tsValue;
+        int64_t tsInt = 0;
+        if (napi_get_named_property(env, actionObj, "timestamp", &tsValue) == napi_ok) {
+            napi_get_value_int64(env, tsValue, &tsInt);
+        }
+        action.timestamp = tsInt;
+        
+        // points
+        napi_value pointsValue;
+        bool pointsIsArray = false;
+        if (napi_get_named_property(env, actionObj, "points", &pointsValue) == napi_ok &&
+            napi_is_array(env, pointsValue, &pointsIsArray) == napi_ok && pointsIsArray) {
+            uint32_t pLen = 0;
+            napi_get_array_length(env, pointsValue, &pLen);
+            action.points.reserve(pLen);
+            for (uint32_t j = 0; j < pLen; j++) {
+                napi_value pObj;
+                if (napi_get_element(env, pointsValue, j, &pObj) != napi_ok) continue;
+                
+                napi_value xVal;
+                napi_value yVal;
+                double x = 0;
+                double y = 0;
+                if (napi_get_named_property(env, pObj, "x", &xVal) == napi_ok) {
+                    napi_get_value_double(env, xVal, &x);
+                }
+                if (napi_get_named_property(env, pObj, "y", &yVal) == napi_ok) {
+                    napi_get_value_double(env, yVal, &y);
+                }
+                action.points.push_back(Point{static_cast<float>(x), static_cast<float>(y)});
+            }
+        }
+        
+        actions.push_back(action);
+    }
+    
+    render->engine_->SetActions(actions);
+    return nullptr;
 }
 
 napi_value PaperCutRender::SetZoom(napi_env env, napi_callback_info info)

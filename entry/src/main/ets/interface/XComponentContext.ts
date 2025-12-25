@@ -33,6 +33,7 @@ export default interface XComponentContext {
   redo(): void;
   clear(): void;
   getActions(): Action[];
+  setActions(actions: Action[]): void;
   setZoom(zoom: number): void;
   setPan(x: number, y: number): void;
 };

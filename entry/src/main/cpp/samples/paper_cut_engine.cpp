@@ -251,8 +251,8 @@ void PaperCutEngine::RenderPreview()
     // 清空画布
     OH_Drawing_CanvasClear(canvas, 0xFFFDF6E3);  // 米色背景
     
-    // 绘制输出画布（预览区）
-    RenderOutputCanvas(canvas);
+    // ③ PreviewCanvas - 展示层：只读 OffscreenCanvas，并进行旋转/镜像/对称展开
+    RenderPreviewCanvas(canvas);
     
     // 获取bitmap的像素数据
     void* bitmapAddr = OH_Drawing_BitmapGetPixels(bitmap);
@@ -767,15 +767,25 @@ void PaperCutEngine::SetPaperColor(uint32_t color)
 void PaperCutEngine::StartDrawing(float x, float y)
 {
     if (isDrawing_) return;
+    // InputCanvas：必须限制在当前扇形区域内（否则不启动一次绘制）
+    if (!IsPointInSector(x, y)) {
+        return;
+    }
     
     isDrawing_ = true;
     currentPoints_.clear();
     currentPoints_.push_back(Point(x, y));
+    // InputCanvas 需要立即更新（临时路径）
+    MarkInputDirty();
 }
 
 void PaperCutEngine::AddPoint(float x, float y)
 {
     if (!isDrawing_) return;
+    // InputCanvas：丢弃扇形外点，保证 Offscreen（数据层）永不被污染
+    if (!IsPointInSector(x, y)) {
+        return;
+    }
     
     // 检查距离，避免点太密集
     if (!currentPoints_.empty()) {
@@ -788,6 +798,8 @@ void PaperCutEngine::AddPoint(float x, float y)
     }
     
     currentPoints_.push_back(Point(x, y));
+    // InputCanvas 需要更新（临时路径）
+    MarkInputDirty();
 }
 
 void PaperCutEngine::FinishDrawing()
@@ -795,6 +807,11 @@ void PaperCutEngine::FinishDrawing()
     if (!isDrawing_ || currentPoints_.size() < 2) {
         isDrawing_ = false;
         currentPoints_.clear();
+        // 结束时清空 InputCanvas
+        if (inputCanvas_) {
+            OH_Drawing_CanvasClear(inputCanvas_, 0x00000000);
+            inputDirty_ = false;
+        }
         return;
     }
     
@@ -805,34 +822,21 @@ void PaperCutEngine::FinishDrawing()
     } else if (currentToolMode_ == ToolMode::DRAFT_PEN) {
         cmd = std::make_unique<PencilCommand>(currentPoints_);
     } else if (currentToolMode_ == ToolMode::DRAFT_ERASER) {
-        cmd = std::make_unique<EraserCommand>(currentPoints_);
+        cmd = std::make_unique<EraserCommand>(currentPoints_, paperColor_);
     }
     
     if (cmd) {
         // 应用到OffscreenCanvas
         ApplyCommandToOffscreenCanvas(std::move(cmd));
-        
-        // 同时更新Action列表（兼容旧接口）
-        Action action;
-        if (currentToolMode_ == ToolMode::SCISSORS) {
-            action.type = ActionType::CUT;
-        } else {
-            action.type = ActionType::STROKE;
-        }
-        action.tool = currentToolMode_;
-        action.points = currentPoints_;
-        action.id = std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count());
-        action.timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count();
-        actions_.push_back(action);
     }
-    
-    actionRedoStack_.clear();
     
     isDrawing_ = false;
     currentPoints_.clear();
-    MarkInputDirty();  // 标记InputCanvas需要更新
+    // InputCanvas 在抬笔必须立即清空
+    if (inputCanvas_) {
+        OH_Drawing_CanvasClear(inputCanvas_, 0x00000000);
+        inputDirty_ = false;
+    }
 }
 
 void PaperCutEngine::CancelDrawing()
@@ -870,19 +874,6 @@ void PaperCutEngine::CloseBezier()
     auto cmd = std::make_unique<CutCommand>(finalPoints);
     ApplyCommandToOffscreenCanvas(std::move(cmd));
     
-    // 同时更新Action列表（兼容旧接口）
-    Action action;
-    action.id = std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::system_clock::now().time_since_epoch()).count());
-    action.type = ActionType::CUT;
-    action.tool = ToolMode::SCISSORS;
-    action.points = finalPoints;
-    action.timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::system_clock::now().time_since_epoch()).count();
-    
-    actions_.push_back(action);
-    actionRedoStack_.clear();
-    
     CancelBezier();
 }
 
@@ -897,13 +888,6 @@ void PaperCutEngine::Undo()
     // 使用命令模式的撤销
     if (!commandHistory_.empty()) {
         RevertCommandFromOffscreenCanvas();
-        
-        // 同时更新Action列表（兼容旧接口）
-        if (!actions_.empty()) {
-            Action last = actions_.back();
-            actions_.pop_back();
-            actionRedoStack_.insert(actionRedoStack_.begin(), last);
-        }
     }
 }
 
@@ -914,32 +898,14 @@ void PaperCutEngine::Redo()
         std::unique_ptr<ICommand> cmd = std::move(redoStack_.back());
         redoStack_.pop_back();
         ApplyCommandToOffscreenCanvas(std::move(cmd));
-        
-        // 同时更新Action列表（兼容旧接口）
-        if (!actionRedoStack_.empty()) {
-            Action next = actionRedoStack_[0];
-            actionRedoStack_.erase(actionRedoStack_.begin());
-            actions_.push_back(next);
-        }
     }
 }
 
 void PaperCutEngine::Clear()
 {
-    // 使用命令模式的清空
+    // 命令型清空（可撤销）：通过 ClearCommand 作为“分界点”，RenderOffscreenCanvas 会只渲染最后一次 clear 之后的命令
     auto cmd = std::make_unique<ClearCommand>();
-    // 保存之前的命令以便撤销
-    // 注意:ClearCommand需要设置previousCommands,这里简化处理
     ApplyCommandToOffscreenCanvas(std::move(cmd));
-    
-    // 清空命令历史
-    commandHistory_.clear();
-    redoStack_.clear();
-    
-    // 同时更新Action列表（兼容旧接口）
-    actions_.clear();
-    actionRedoStack_.clear();
-    
     CancelDrawing();
     CancelBezier();
 }
@@ -966,19 +932,58 @@ void PaperCutEngine::SetFlip(bool flipped)
 
 void PaperCutEngine::AddAction(const Action& action)
 {
-    actions_.push_back(action);
+    // 兼容接口：把 Action 转成 Command 并写入 OffscreenCanvas（单向数据流）
+    std::unique_ptr<ICommand> cmd;
+    if (action.points.empty()) {
+        // 约定：空 points 视为 Clear
+        cmd = std::make_unique<ClearCommand>();
+    } else if (action.tool == ToolMode::SCISSORS) {
+        cmd = std::make_unique<CutCommand>(action.points);
+    } else if (action.tool == ToolMode::DRAFT_PEN) {
+        cmd = std::make_unique<PencilCommand>(action.points);
+    } else if (action.tool == ToolMode::DRAFT_ERASER) {
+        cmd = std::make_unique<EraserCommand>(action.points, paperColor_);
+    }
+    if (cmd) {
+        ApplyCommandToOffscreenCanvas(std::move(cmd));
+    }
 }
 
 std::vector<Action> PaperCutEngine::GetActions() const
 {
-    return actions_;
+    // 从命令历史生成动作列表（单一事实来源）
+    std::vector<Action> out;
+    out.reserve(commandHistory_.size());
+    for (const auto& cmd : commandHistory_) {
+        if (cmd) {
+            out.push_back(cmd->ToAction());
+        }
+    }
+    return out;
 }
 
 void PaperCutEngine::SetActions(const std::vector<Action>& actions)
 {
-    actions_ = actions;
-    actionRedoStack_.clear();
+    // 从 Action 列表重建命令历史
+    commandHistory_.clear();
     redoStack_.clear();
+    for (const auto& action : actions) {
+        std::unique_ptr<ICommand> cmd;
+        if (action.points.empty()) {
+            cmd = std::make_unique<ClearCommand>();
+        } else if (action.tool == ToolMode::SCISSORS) {
+            cmd = std::make_unique<CutCommand>(action.points);
+        } else if (action.tool == ToolMode::DRAFT_PEN) {
+            cmd = std::make_unique<PencilCommand>(action.points);
+        } else if (action.tool == ToolMode::DRAFT_ERASER) {
+            cmd = std::make_unique<EraserCommand>(action.points, paperColor_);
+        }
+        if (cmd) {
+            commandHistory_.push_back(std::move(cmd));
+        }
+    }
+    offscreenDirty_ = true;
+    RenderOffscreenCanvas();
 }
 
 Point PaperCutEngine::ScreenToModel(float x, float y) const
@@ -1142,8 +1147,8 @@ Action PencilCommand::ToAction() const
 }
 
 // EraserCommand 实现
-EraserCommand::EraserCommand(const std::vector<Point>& points)
-    : points_(points)
+EraserCommand::EraserCommand(const std::vector<Point>& points, uint32_t backgroundColor)
+    : points_(points), backgroundColor_(backgroundColor)
 {
     id_ = std::to_string(std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::system_clock::now().time_since_epoch()).count());
@@ -1153,7 +1158,7 @@ void EraserCommand::Apply(OH_Drawing_Canvas* canvas)
 {
     if (!canvas) return;
     // 使用纸张颜色作为背景色来擦除
-    PaperCutEngine::ErasePencilStroke(canvas, points_, 0xFFC4161C);  // 使用默认纸张颜色
+    PaperCutEngine::ErasePencilStroke(canvas, points_, backgroundColor_);
 }
 
 void EraserCommand::Revert(OH_Drawing_Canvas* canvas)
@@ -1314,8 +1319,15 @@ void PaperCutEngine::RenderOffscreenCanvas()
     OH_Drawing_CanvasClipPath(offscreenCanvas_, clipPath, OH_Drawing_CanvasClipOp::INTERSECT, true);
     OH_Drawing_PathDestroy(clipPath);
     
-    // 应用所有命令(命令中的坐标是模型坐标,所以可以直接应用)
-    for (const auto& cmd : commandHistory_) {
+    // ClearCommand 作为“分界点”：只渲染最后一次 clear 之后的命令
+    size_t startIndex = 0;
+    for (size_t i = 0; i < commandHistory_.size(); i++) {
+        if (dynamic_cast<ClearCommand*>(commandHistory_[i].get()) != nullptr) {
+            startIndex = i + 1;
+        }
+    }
+    for (size_t i = startIndex; i < commandHistory_.size(); i++) {
+        const auto& cmd = commandHistory_[i];
         if (cmd) {
             cmd->Apply(offscreenCanvas_);
         }
@@ -1410,6 +1422,25 @@ void PaperCutEngine::CompositeLayers(OH_Drawing_Canvas* targetCanvas)
             
             OH_Drawing_CanvasSave(inputCanvas_);
             OH_Drawing_CanvasTranslate(inputCanvas_, modelCenterX, modelCenterY);
+
+            // ① InputCanvas 必须裁剪到当前扇形(sector)区域（交互约束）
+            if (!isFullPaper) {
+                float clipRadius = std::min(canvasWidth_, canvasHeight_) * CLIP_RADIUS_RATIO;
+                float sectorAngle2 = (2.0f * M_PI) / (static_cast<int>(foldMode_) + 1);
+                float startAngle = -M_PI / 2.0f;
+                float endAngle = startAngle + sectorAngle2;
+                OH_Drawing_Path* sectorPath = OH_Drawing_PathCreate();
+                OH_Drawing_PathMoveTo(sectorPath, 0, 0);
+                for (float angle = startAngle; angle <= endAngle; angle += 0.05f) {
+                    float sx = cos(angle) * clipRadius;
+                    float sy = sin(angle) * clipRadius;
+                    OH_Drawing_PathLineTo(sectorPath, sx, sy);
+                }
+                OH_Drawing_PathLineTo(sectorPath, 0, 0);
+                OH_Drawing_PathClose(sectorPath);
+                OH_Drawing_CanvasClipPath(inputCanvas_, sectorPath, OH_Drawing_CanvasClipOp::INTERSECT, true);
+                OH_Drawing_PathDestroy(sectorPath);
+            }
             
             if (currentToolMode_ == ToolMode::SCISSORS) {
                 OH_Drawing_Path* previewPath = OH_Drawing_PathCreate();
@@ -1447,5 +1478,95 @@ void PaperCutEngine::CompositeLayers(OH_Drawing_Canvas* targetCanvas)
     
     // 恢复变换
     OH_Drawing_CanvasRestore(targetCanvas);
+}
+
+bool PaperCutEngine::IsPointInSector(float x, float y) const
+{
+    // 0 折：不限制扇形（整张纸）
+    if (foldMode_ == FoldMode::ZERO) {
+        return true;
+    }
+    
+    // 扇形半径与 InputCanvas clip 逻辑保持一致
+    float clipRadius = std::min(canvasWidth_, canvasHeight_) * CLIP_RADIUS_RATIO;
+    float r2 = x * x + y * y;
+    if (r2 > clipRadius * clipRadius) {
+        return false;
+    }
+    
+    // 扇形角度范围：[-pi/2, -pi/2 + sectorAngle]
+    float sectorAngle = (2.0f * M_PI) / (static_cast<int>(foldMode_) + 1);
+    float angle = atan2(y, x);
+    // 平移到 [0, 2pi) 再以 startAngle 为零基准
+    float start = -M_PI / 2.0f;
+    float shifted = angle - start;
+    while (shifted < 0) shifted += 2.0f * M_PI;
+    while (shifted >= 2.0f * M_PI) shifted -= 2.0f * M_PI;
+    
+    return shifted >= 0.0f && shifted <= sectorAngle;
+}
+
+void PaperCutEngine::RenderPreviewCanvas(OH_Drawing_Canvas* canvas)
+{
+    // PreviewCanvas：只读 OffscreenCanvas，并做对称展开；绝不修改数据层
+    if (!canvas || !layersInitialized_ || !offscreenBitmap_) return;
+    
+    int width = OH_Drawing_CanvasGetWidth(canvas);
+    int height = OH_Drawing_CanvasGetHeight(canvas);
+    float centerX = width * 0.5f;
+    float centerY = height * 0.5f;
+    
+    bool isFullPaper = (foldMode_ == FoldMode::ZERO);
+    int totalSegments = isFullPaper ? 1 : (static_cast<int>(foldMode_) + 1);
+    float sectorAngle = isFullPaper ? (2.0f * M_PI) : ((2.0f * M_PI) / totalSegments);
+    
+    // Offscreen(固定 2048) -> Preview(窗口尺寸) 的比例映射，保证预览缩放一致
+    float srcSize = static_cast<float>(std::min(canvasWidth_, canvasHeight_));
+    float dstSize = static_cast<float>(std::min(width, height));
+    float scale = (srcSize > 0.0f) ? (dstSize / srcSize) : 1.0f;
+    
+    // 预览以画布中心为原点进行展开
+    OH_Drawing_CanvasSave(canvas);
+    OH_Drawing_CanvasTranslate(canvas, centerX, centerY);
+    OH_Drawing_CanvasScale(canvas, scale, scale);
+    
+    for (int i = 0; i < totalSegments; i++) {
+        OH_Drawing_CanvasSave(canvas);
+        
+        // 旋转到第 i 段
+        OH_Drawing_CanvasRotate(canvas, (i * sectorAngle) * 180.0f / M_PI, 0, 0);
+        
+        // 奇数段镜像（折纸对称）
+        if (!isFullPaper && (i % 2 == 1)) {
+            OH_Drawing_CanvasScale(canvas, -1.0f, 1.0f);
+        }
+
+        // 每段必须裁剪到扇形区域，避免“整张 bitmap 覆盖”导致前一段的镂空被后续段填回
+        if (!isFullPaper) {
+            float paperRadius = std::min(canvasWidth_, canvasHeight_) * PAPER_RADIUS_RATIO;
+            float startAngle = -M_PI / 2.0f;
+            float endAngle = startAngle + sectorAngle;
+            OH_Drawing_Path* sectorPath = OH_Drawing_PathCreate();
+            OH_Drawing_PathMoveTo(sectorPath, 0, 0);
+            for (float angle = startAngle; angle <= endAngle; angle += 0.05f) {
+                float sx = cos(angle) * paperRadius;
+                float sy = sin(angle) * paperRadius;
+                OH_Drawing_PathLineTo(sectorPath, sx, sy);
+            }
+            OH_Drawing_PathLineTo(sectorPath, 0, 0);
+            OH_Drawing_PathClose(sectorPath);
+            OH_Drawing_CanvasClipPath(canvas, sectorPath, OH_Drawing_CanvasClipOp::INTERSECT, true);
+            OH_Drawing_PathDestroy(sectorPath);
+        }
+        
+        // 把 OffscreenBitmap 绘制到以(0,0)为中心的坐标系中
+        // OffscreenBitmap 内容的模型原点在 bitmap 的中心位置
+        OH_Drawing_CanvasTranslate(canvas, -canvasWidth_ * 0.5f, -canvasHeight_ * 0.5f);
+        OH_Drawing_CanvasDrawBitmap(canvas, offscreenBitmap_, 0, 0);
+        
+        OH_Drawing_CanvasRestore(canvas);
+    }
+    
+    OH_Drawing_CanvasRestore(canvas);
 }
 

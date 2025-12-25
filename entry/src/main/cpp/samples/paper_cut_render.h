@@ -34,6 +34,7 @@ public:
     static napi_value Redo(napi_env env, napi_callback_info info);
     static napi_value Clear(napi_env env, napi_callback_info info);
     static napi_value GetActions(napi_env env, napi_callback_info info);
+    static napi_value SetActions(napi_env env, napi_callback_info info);
     static napi_value SetZoom(napi_env env, napi_callback_info info);
     static napi_value SetPan(napi_env env, napi_callback_info info);
     static napi_value SetPreviewWindow(napi_env env, napi_callback_info info);

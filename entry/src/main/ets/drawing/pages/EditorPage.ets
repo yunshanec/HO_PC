@@ -43,6 +43,9 @@ export struct EditorPage {
   private viewMode: boolean = false;
   private lastPanX: number = 0;
   private lastPanY: number = 0;
+  // 预览渲染：与输入解耦，合并/节流到每帧一次
+  private previewRenderPending: boolean = false;
+  private previewNeedsRender: boolean = false;
 
   aboutToAppear() {
     // 获取传递的参数
@@ -111,10 +114,17 @@ export struct EditorPage {
         this.papercutModule.setFoldMode(this.foldMode);
         this.papercutModule.setToolMode(this.currentTool);
 
+        // 如果是编辑已有作品，恢复 actions（命令历史/离屏数据层）
+        if (this.work && this.work.actions && this.work.actions.length > 0) {
+          console.info('EditorPage: Restoring actions:', this.work.actions.length);
+          this.papercutModule.setActions(this.work.actions);
+        }
+
         // 延迟绘制，确保所有设置都已完成
         setTimeout(() => {
           console.info('EditorPage: Rendering initial canvas...');
           this.render();
+          this.schedulePreviewRender();
         }, 200);
       }
     } catch (error) {
@@ -131,7 +141,7 @@ export struct EditorPage {
         this.previewNativeWindow = nativeWindow;
         this.papercutModule.setPreviewWindow(nativeWindow);
         setTimeout(() => {
-          this.renderPreview();
+          this.schedulePreviewRender();
         }, 200);
       }
     } catch (error) {
@@ -151,6 +161,21 @@ export struct EditorPage {
     if (this.previewNativeWindow && this.papercutModule) {
       this.papercutModule.drawPaperCutPreview(this.previewNativeWindow);
     }
+  }
+
+  // 预览渲染调度：不要在 pointer move 上直接 renderPreview；只标记 dirty，并在下一帧合并刷新
+  schedulePreviewRender() {
+    if (!this.papercutModule) return;
+    if (!(this.showPreview || this.isSplitMode)) return;
+    this.previewNeedsRender = true;
+    if (this.previewRenderPending) return;
+    this.previewRenderPending = true;
+    setTimeout(() => {
+      this.previewRenderPending = false;
+      if (!this.previewNeedsRender) return;
+      this.previewNeedsRender = false;
+      this.renderPreview();
+    }, 16);
   }
 
   onTouchStart(event: TouchEvent) {
@@ -218,7 +243,7 @@ export struct EditorPage {
     this.render();
     // 同时更新预览
     if (this.showPreview || this.isSplitMode) {
-      this.renderPreview();
+      this.schedulePreviewRender();
     }
   }
 
@@ -252,7 +277,7 @@ export struct EditorPage {
       this.papercutModule.setFoldMode(mode);
       this.render();
       if (this.showPreview || this.isSplitMode) {
-        this.renderPreview();
+        this.schedulePreviewRender();
       }
     }
   }
@@ -261,6 +286,7 @@ export struct EditorPage {
     if (this.papercutModule) {
       this.papercutModule.undo();
       this.render();
+      this.schedulePreviewRender();
     }
   }
 
@@ -268,6 +294,7 @@ export struct EditorPage {
     if (this.papercutModule) {
       this.papercutModule.redo();
       this.render();
+      this.schedulePreviewRender();
     }
   }
 
@@ -275,6 +302,7 @@ export struct EditorPage {
     if (this.papercutModule) {
       this.papercutModule.clear();
       this.render();
+      this.schedulePreviewRender();
     }
   }
 
@@ -346,7 +374,7 @@ export struct EditorPage {
     // 当切换到预览模式时，渲染预览
     if (this.showPreview) {
       setTimeout(() => {
-        this.renderPreview();
+        this.schedulePreviewRender();
       }, 100);
     }
   }
@@ -357,7 +385,7 @@ export struct EditorPage {
     this.isSplitMode = !this.isSplitMode;
     if (this.isSplitMode) {
       setTimeout(() => {
-        this.renderPreview();
+        this.schedulePreviewRender();
       }, 100);
     }
   }
