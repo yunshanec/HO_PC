@@ -133,10 +133,26 @@ void PaperCutEngine::Render()
     // 设置裁剪区域 - 纸张逻辑层（中心原点）
     OH_Drawing_CanvasSave(canvas);
     OH_Drawing_Path* clipPath = OH_Drawing_PathCreate();
-    if (paperType_ == PaperType::CIRCLE) {
-        OH_Drawing_PathAddCircle(clipPath, 0, 0, paperRadius, PATH_DIRECTION_CCW);
+    if (isFullPaper) {
+        // 0 折：整张纸可操作
+        if (paperType_ == PaperType::CIRCLE) {
+            OH_Drawing_PathAddCircle(clipPath, 0, 0, paperRadius, PATH_DIRECTION_CCW);
+        } else {
+            OH_Drawing_PathAddRect(clipPath, -paperRadius, -paperRadius, paperRadius, paperRadius, PATH_DIRECTION_CCW);
+        }
     } else {
-        OH_Drawing_PathAddRect(clipPath, -paperRadius, -paperRadius, paperRadius, paperRadius, PATH_DIRECTION_CCW);
+        // WebEditor 对齐：折叠模式仅显示/操作 wedge（扇形裁剪）
+        const float clipRadius = std::min(canvasWidth_, canvasHeight_) * CLIP_RADIUS_RATIO;
+        const float startAngle = -M_PI / 2.0f;
+        const float endAngle = startAngle + sectorAngle;
+        OH_Drawing_PathMoveTo(clipPath, 0, 0);
+        for (float angle = startAngle; angle <= endAngle; angle += 0.05f) {
+            float x = cos(angle) * clipRadius;
+            float y = sin(angle) * clipRadius;
+            OH_Drawing_PathLineTo(clipPath, x, y);
+        }
+        OH_Drawing_PathLineTo(clipPath, 0, 0);
+        OH_Drawing_PathClose(clipPath);
     }
     OH_Drawing_CanvasClipPath(canvas, clipPath, OH_Drawing_CanvasClipOp::INTERSECT, true);
     OH_Drawing_PathDestroy(clipPath);
@@ -493,10 +509,9 @@ void PaperCutEngine::DrawFoldLines(OH_Drawing_Canvas* canvas)
     
     // 注意：这个函数在RenderInputCanvas中被调用，此时坐标系统已经变换
     // 中心点已经移动到(0,0)，所以使用相对坐标
-    int width = OH_Drawing_CanvasGetWidth(canvas);
-    int height = OH_Drawing_CanvasGetHeight(canvas);
-    float paperRadius = std::min(width, height) * PAPER_RADIUS_RATIO;
-    float clipRadius = std::min(width, height) * CLIP_RADIUS_RATIO;
+    // WebEditor 对齐：几何以逻辑画布尺寸(2048)为基准，不依赖屏幕 buffer 尺寸
+    float paperRadius = std::min(canvasWidth_, canvasHeight_) * PAPER_RADIUS_RATIO;
+    float clipRadius = std::min(canvasWidth_, canvasHeight_) * CLIP_RADIUS_RATIO;
     
     bool isFullPaper = (foldMode_ == FoldMode::ZERO);
     int totalSegments = isFullPaper ? 1 : (static_cast<int>(foldMode_) * 2);

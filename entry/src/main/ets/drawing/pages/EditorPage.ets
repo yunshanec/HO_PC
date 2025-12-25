@@ -494,8 +494,7 @@ export struct EditorPage {
               .width('100%')
               .height('100%')
               .backgroundColor('#FDF6E3')
-              .scale({ x: this.scaleValue, y: this.scaleValue, z: 1 })
-              .translate({ x: this.panX, y: this.panY, z: 0 })
+              // 重要：不要在 ArkUI 层对 Surface 再做 scale/translate（会与 Native 引擎内部 zoom/pan 叠加，导致显示与 Web 严重不一致）
               .gesture(
                 GestureGroup(GestureMode.Exclusive,
                   // 捏合手势 - 缩放
