@@ -127,7 +127,8 @@ void PaperCutEngine::Render()
     uint32_t height = static_cast<uint32_t>(handle->height);
     
     OH_Drawing_Bitmap* bitmap = OH_Drawing_BitmapCreate();
-    OH_Drawing_BitmapFormat format{COLOR_FORMAT_RGBA_8888, ALPHA_FORMAT_OPAQUE};
+    // 开启 PREMUL 以便抗锯齿边缘能正确用 alpha 混合到背景
+    OH_Drawing_BitmapFormat format{COLOR_FORMAT_RGBA_8888, ALPHA_FORMAT_PREMUL};
     OH_Drawing_BitmapBuild(bitmap, width, height, &format);
     
     // 创建Canvas
@@ -251,7 +252,7 @@ void PaperCutEngine::RenderPreview()
     uint32_t height = static_cast<uint32_t>(handle->height);
     
     OH_Drawing_Bitmap* bitmap = OH_Drawing_BitmapCreate();
-    OH_Drawing_BitmapFormat format{COLOR_FORMAT_RGBA_8888, ALPHA_FORMAT_OPAQUE};
+    OH_Drawing_BitmapFormat format{COLOR_FORMAT_RGBA_8888, ALPHA_FORMAT_PREMUL};
     OH_Drawing_BitmapBuild(bitmap, width, height, &format);
     
     // 创建Canvas
@@ -492,6 +493,7 @@ void PaperCutEngine::DrawPaperBase(OH_Drawing_Canvas* canvas)
     
     OH_Drawing_Brush* brush = OH_Drawing_BrushCreate();
     OH_Drawing_BrushSetColor(brush, paperColor_);
+    OH_Drawing_BrushSetAntiAlias(brush, true);
     
     OH_Drawing_Path* path = OH_Drawing_PathCreate();
     
@@ -1298,6 +1300,7 @@ void PaperCutEngine::RenderOffscreenCanvas()
     // 绘制纸张底色(在模型坐标系统中,中心是(0,0))
     OH_Drawing_Brush* brush = OH_Drawing_BrushCreate();
     OH_Drawing_BrushSetColor(brush, paperColor_);
+    OH_Drawing_BrushSetAntiAlias(brush, true);
     
     OH_Drawing_Path* paperPath = OH_Drawing_PathCreate();
     if (paperType_ == PaperType::CIRCLE) {
@@ -1439,6 +1442,7 @@ void PaperCutEngine::CompositeLayers(OH_Drawing_Canvas* targetCanvas)
                 OH_Drawing_Pen* pen = OH_Drawing_PenCreate();
                 OH_Drawing_PenSetColor(pen, 0xFFFFD700);
                 OH_Drawing_PenSetWidth(pen, 5.0f);
+                OH_Drawing_PenSetAntiAlias(pen, true);
                 OH_Drawing_CanvasAttachPen(inputCanvas_, pen);
                 OH_Drawing_CanvasDrawPath(inputCanvas_, previewPath);
                 OH_Drawing_CanvasDetachPen(inputCanvas_);

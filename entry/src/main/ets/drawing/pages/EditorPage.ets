@@ -382,11 +382,11 @@ export struct EditorPage {
       this.showPreview = !this.showPreview;
     }
     // 当切换到预览模式时，渲染预览
-    if (this.showPreview) {
-      setTimeout(() => {
-        this.schedulePreviewRender();
-      }, 100);
-    }
+    // 切换会改变布局/Surface buffer，必须强制重绘，避免“畸形/旧帧残留”
+    setTimeout(() => {
+      this.render();
+      this.schedulePreviewRender();
+    }, 80);
   }
 
   onToggleSplit() {
@@ -395,8 +395,13 @@ export struct EditorPage {
     this.isSplitMode = !this.isSplitMode;
     if (this.isSplitMode) {
       setTimeout(() => {
+        this.render();
         this.schedulePreviewRender();
       }, 100);
+    } else {
+      setTimeout(() => {
+        this.render();
+      }, 80);
     }
   }
 
